@@ -180,7 +180,41 @@ export default defineSchema({
   sendblueDedup: defineTable({
     handle: v.string(),
     claimedAt: v.number(),
-  }).index("by_handle", ["handle"]),
+    // Optional while legacy claim-only rows remain in existing deployments.
+    // Rows without a status are treated as already completed.
+    status: v.optional(
+      v.union(
+        v.literal("pending"),
+        v.literal("processing"),
+        v.literal("completed"),
+        v.literal("dead_letter"),
+      ),
+    ),
+    capability: v.optional(v.string()),
+    // AES-GCM ciphertext; inbound content and contact data never appear in a
+    // publicly queryable Convex document as plaintext.
+    payload: v.optional(v.string()),
+    payloadDigest: v.optional(v.string()),
+    attempts: v.optional(v.number()),
+    nextAttemptAt: v.optional(v.number()),
+    leaseToken: v.optional(v.string()),
+    leaseExpiresAt: v.optional(v.number()),
+    lastError: v.optional(v.string()),
+    completedAt: v.optional(v.number()),
+    deadLetteredAt: v.optional(v.number()),
+    deadLetterReason: v.optional(v.string()),
+  })
+    .index("by_handle", ["handle"])
+    .index("by_capability_and_status_and_next_attempt_at", [
+      "capability",
+      "status",
+      "nextAttemptAt",
+    ])
+    .index("by_capability_and_status_and_lease_expires_at", [
+      "capability",
+      "status",
+      "leaseExpiresAt",
+    ]),
 
   drafts: defineTable({
     draftId: v.string(),

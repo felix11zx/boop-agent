@@ -238,6 +238,9 @@ Format: Plain iMessage-friendly text. Markdown sparingly. Keep replies under ~40
 interface HandleOpts {
   conversationId: string;
   content: string;
+  // Stable for durable transports so retries reuse the same internal turn.
+  // Local callers may omit it and receive a generated ID.
+  turnId?: string;
   turnTag?: string;
   onThinking?: (chunk: string) => void;
   // "proactive" persists the inbound message with role=system instead of
@@ -317,7 +320,7 @@ export function resolveSpawnIntegrations(
 }
 
 export async function handleUserMessage(opts: HandleOpts): Promise<string> {
-  const turnId = randomId("turn");
+  const turnId = opts.turnId ?? randomId("turn");
   const integrations = (await listEnabledIntegrations()).map((i) => i.name);
 
   const inboundRole = opts.kind === "proactive" ? "system" : "user";

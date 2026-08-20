@@ -1,5 +1,9 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { sendImessage } from "../server/sendblue.js";
+import {
+  classifySendblueInboxFailure,
+  sendImessage,
+  SendblueDeliveryError,
+} from "../server/sendblue.js";
 
 const originalApiKey = process.env.SENDBLUE_API_KEY;
 const originalApiSecret = process.env.SENDBLUE_API_SECRET;
@@ -42,5 +46,50 @@ describe("sendImessage", () => {
       number: recipient,
       content: "Call [phone number hidden]",
     });
+  });
+
+  it("rejects failed deliveries so the durable inbox can retry them", async () => {
+    process.env.SENDBLUE_API_KEY = "test-key";
+    process.env.SENDBLUE_API_SECRET = "test-secret";
+    process.env.SENDBLUE_FROM_NUMBER = "+15550000100";
+    vi.stubGlobal("fetch", vi.fn(async () => new Response("unavailable", { status: 503 })));
+
+    await expect(sendImessage("+15550000101", "Try again")).rejects.toThrow(
+      "Sendblue send failed with HTTP 503",
+    );
+  });
+
+  it("classifies ambiguous transport outcomes as non-retryable", async () => {
+    process.env.SENDBLUE_API_KEY = "test-key";
+    process.env.SENDBLUE_API_SECRET = "test-secret";
+    process.env.SENDBLUE_FROM_NUMBER = "+15550000100";
+    vi.stubGlobal("fetch", vi.fn(async () => {
+      throw new TypeError("socket closed");
+    }));
+
+    let failure: unknown;
+    try {
+      await sendImessage("+15550000101", "Do not duplicate me");
+    } catch (error) {
+      failure = error;
+    }
+    expect(failure).toBeInstanceOf(SendblueDeliveryError);
+    expect(classifySendblueInboxFailure(failure)).toEqual({
+      action: "dead_letter",
+      reason: "delivery_outcome_unknown",
+    });
+  });
+
+  it("does not retry permanent Sendblue rejections", () => {
+    expect(
+      classifySendblueInboxFailure(
+        new SendblueDeliveryError("unauthorized", "rejected", false),
+      ),
+    ).toEqual({ action: "dead_letter", reason: "permanent_delivery_failure" });
+    expect(
+      classifySendblueInboxFailure(
+        new SendblueDeliveryError("busy", "rejected", true),
+      ),
+    ).toEqual({ action: "retry" });
   });
 });

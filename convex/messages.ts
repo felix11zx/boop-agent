@@ -12,6 +12,18 @@ export const send = mutation({
     mediaError: v.optional(v.string()),
   },
   handler: async (ctx, args) => {
+    if (args.turnId) {
+      const existing = await ctx.db
+        .query("messages")
+        .withIndex("by_conversation_turn", (q) =>
+          q.eq("conversationId", args.conversationId).eq("turnId", args.turnId),
+        )
+        .take(50);
+      const duplicate = existing.find(
+        (message) => message.role === args.role && message.content === args.content,
+      );
+      if (duplicate) return duplicate._id;
+    }
     const now = Date.now();
     const id = await ctx.db.insert("messages", { ...args, createdAt: now });
 
