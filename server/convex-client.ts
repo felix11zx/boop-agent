@@ -1,4 +1,5 @@
 import { ConvexHttpClient } from "convex/browser";
+import { createConvexFetch, createNodeHttpFetch } from "./convex-fetch.js";
 
 const url = process.env.CONVEX_URL ?? process.env.VITE_CONVEX_URL;
 if (!url) {
@@ -7,4 +8,13 @@ if (!url) {
   );
 }
 
-export const convex = new ConvexHttpClient(url);
+const convexFetch = createConvexFetch({
+  fetchImpl: createNodeHttpFetch(),
+  onRetry: ({ attempt, delayMs, phase }) => {
+    console.warn(
+      `[convex] transient ${phase} failure; retrying (${attempt}/3) in ${delayMs}ms`,
+    );
+  },
+});
+
+export const convex = new ConvexHttpClient(url, { fetch: convexFetch });
