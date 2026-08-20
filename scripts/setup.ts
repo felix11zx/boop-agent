@@ -1,10 +1,13 @@
 #!/usr/bin/env tsx
 import prompts from "prompts";
 import { spawn } from "node:child_process";
+import { randomBytes } from "node:crypto";
 import { existsSync, readFileSync, realpathSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { delimiter, dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+import { DEFAULT_CODEX_MODEL } from "../server/codex-model-catalog.js";
+import { deriveSendblueInboxCapability } from "../server/sendblue-inbox-crypto.js";
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const ENV_PATH = resolve(ROOT, ".env.local");
@@ -13,7 +16,6 @@ const EXAMPLE_PATH = resolve(ROOT, ".env.example");
 type RuntimeChoice = "claude" | "codex";
 
 const DEFAULT_CLAUDE_MODEL = "claude-sonnet-4-6";
-const DEFAULT_CODEX_MODEL = "gpt-5.5";
 const DEFAULT_CODEX_REASONING_EFFORT = "medium";
 
 interface CommandSpec {
@@ -28,18 +30,25 @@ const CLAUDE_MODEL_CHOICES = [
 ];
 
 const CODEX_MODEL_CHOICES = [
-  { title: "gpt-5.5 (most capable)", value: "gpt-5.5" },
-  { title: "gpt-5.4-mini (faster local testing)", value: "gpt-5.4-mini" },
-  { title: "gpt-5.4 (balanced)", value: "gpt-5.4" },
-  { title: "gpt-5.3-codex (coding optimized)", value: "gpt-5.3-codex" },
+  { title: "gpt-5.6-sol (recommended, flagship)", value: "gpt-5.6-sol" },
+  { title: "gpt-5.6-terra (balanced)", value: "gpt-5.6-terra" },
+  { title: "gpt-5.6-luna (fastest)", value: "gpt-5.6-luna" },
+  { title: "gpt-5.5 (previous frontier)", value: "gpt-5.5" },
 ];
 
 const CODEX_REASONING_CHOICES = [
   { title: "low (fastest)", value: "low" },
   { title: "medium (recommended)", value: "medium" },
   { title: "high (deeper reasoning)", value: "high" },
-  { title: "xhigh (maximum reasoning)", value: "xhigh" },
+  { title: "xhigh (very deep reasoning)", value: "xhigh" },
+  { title: "max (GPT-5.6 hardest tasks)", value: "max" },
 ];
+
+function codexReasoningChoicesForModel(model: unknown) {
+  return model === "gpt-5.5"
+    ? CODEX_REASONING_CHOICES.filter((choice) => choice.value !== "max")
+    : CODEX_REASONING_CHOICES;
+}
 
 function runtimeFromEnv(value: string | undefined): RuntimeChoice {
   return value === "codex" ? "codex" : "claude";
@@ -262,6 +271,34 @@ async function runConvexDev(): Promise<void> {
       code === 0 ? resolvePromise() : reject(new Error(`convex dev exited ${code}`)),
     );
   });
+}
+
+async function syncConvexInboxCapability(capability: string): Promise<void> {
+  const runner = packageCommand("convex", "convex");
+  await new Promise<void>((resolvePromise, reject) => {
+    const child = spawn(
+      runner.cmd,
+      [
+        ...runner.leading,
+        "env",
+        "set",
+        "SENDBLUE_INBOX_CAPABILITY",
+        capability,
+      ],
+      {
+        stdio: ["ignore", "ignore", "inherit"],
+        cwd: ROOT,
+        env: commandEnv(),
+      },
+    );
+    child.on("exit", (code) =>
+      code === 0
+        ? resolvePromise()
+        : reject(new Error(`convex env set exited ${code}`)),
+    );
+    child.on("error", reject);
+  });
+  console.log("\n✓ Synchronized the Convex Sendblue inbox capability.");
 }
 
 function hasBinary(name: string): Promise<boolean> {
@@ -535,6 +572,8 @@ Before you start:
   const sendblueDefaults = {
     SENDBLUE_API_KEY: cliKeys?.apiKey ?? existing.SENDBLUE_API_KEY ?? "",
     SENDBLUE_API_SECRET: cliKeys?.apiSecret ?? existing.SENDBLUE_API_SECRET ?? "",
+    SENDBLUE_INBOX_KEY:
+      existing.SENDBLUE_INBOX_KEY ?? randomBytes(32).toString("base64url"),
     SENDBLUE_FROM_NUMBER: cliKeys?.fromNumber ?? existing.SENDBLUE_FROM_NUMBER ?? "",
   };
 
@@ -607,12 +646,14 @@ Before you start:
           values.BOOP_RUNTIME === "codex" ? "select" : null,
         name: "BOOP_CODEX_REASONING_EFFORT",
         message: "How much Codex reasoning effort should Boop use?",
-        choices: CODEX_REASONING_CHOICES,
-        initial: initialForChoice(
-          CODEX_REASONING_CHOICES,
-          existing.BOOP_CODEX_REASONING_EFFORT,
-          1,
-        ),
+        choices: (_prev: unknown, values: Record<string, unknown>) =>
+          codexReasoningChoicesForModel(values.BOOP_CODEX_MODEL),
+        initial: (_prev: unknown, values: Record<string, unknown>) =>
+          initialForChoice(
+            codexReasoningChoicesForModel(values.BOOP_CODEX_MODEL),
+            existing.BOOP_CODEX_REASONING_EFFORT,
+            1,
+          ),
       },
       {
         type: "text",
@@ -647,6 +688,7 @@ Before you start:
       DEFAULT_CODEX_REASONING_EFFORT,
     SENDBLUE_API_KEY: answers.SENDBLUE_API_KEY ?? sendblueDefaults.SENDBLUE_API_KEY,
     SENDBLUE_API_SECRET: answers.SENDBLUE_API_SECRET ?? sendblueDefaults.SENDBLUE_API_SECRET,
+    SENDBLUE_INBOX_KEY: sendblueDefaults.SENDBLUE_INBOX_KEY,
     SENDBLUE_FROM_NUMBER: answers.SENDBLUE_FROM_NUMBER ?? sendblueDefaults.SENDBLUE_FROM_NUMBER,
   });
 
@@ -856,11 +898,12 @@ the browser integration unless you enable it.
   // ---- Tunnel configuration ------------------------------------------------
   banner("Tunnel — public URL for Sendblue to reach your server");
   console.log(`
-ngrok's FREE plan gives you a NEW public URL every restart, which means
-re-pasting into Sendblue every time. For a stable URL, pick one of:
+ngrok's FREE plan includes an automatically assigned development domain.
+Boop reads the active URL and synchronizes Sendblue on every start, so no
+paid domain and no repeated dashboard paste are required.
 
-  1. Free ngrok             (fine for testing / demos — re-paste each restart)
-  2. ngrok RESERVED domain  (paid — stays the same across restarts)
+  1. Free ngrok             (recommended — automatic URL + webhook sync)
+  2. ngrok custom domain    (paid — only if you want your own hostname)
   3. Cloudflare Tunnel / other static tunnel you set up yourself
 `);
 
@@ -870,8 +913,8 @@ re-pasting into Sendblue every time. For a stable URL, pick one of:
       name: "tunnelChoice",
       message: "Which option are you using?",
       choices: [
-        { title: "Free ngrok — I'll paste a new URL each restart", value: "free" },
-        { title: "ngrok reserved domain (paid)", value: "ngrok-domain" },
+        { title: "Free ngrok — automatic URL + webhook sync", value: "free" },
+        { title: "ngrok custom domain (paid)", value: "ngrok-domain" },
         { title: "Cloudflare Tunnel or another stable URL", value: "static" },
       ],
       initial: 0,
@@ -888,7 +931,7 @@ re-pasting into Sendblue every time. For a stable URL, pick one of:
     const { NGROK_DOMAIN } = await prompts({
       type: "text",
       name: "NGROK_DOMAIN",
-      message: "Your ngrok reserved domain (e.g. boop.ngrok.app, no https://):",
+      message: "Your custom ngrok domain (e.g. boop.ngrok.app, no https://):",
       initial: existing.NGROK_DOMAIN ?? "",
     });
     const clean = (NGROK_DOMAIN ?? "").replace(/^https?:\/\//, "").replace(/\/$/, "");
@@ -908,8 +951,13 @@ re-pasting into Sendblue every time. For a stable URL, pick one of:
       (answers as any).NGROK_DOMAIN = "";
     }
   } else {
-    // free ngrok — clear any stale domain and keep PUBLIC_URL at the localhost default
+    // Free ngrok must keep PUBLIC_URL local; a stale static URL would make
+    // scripts/dev.mjs skip ngrok entirely. The active tunnel URL is discovered
+    // from ngrok's local API and synchronized automatically.
+    const localPort = answers.PORT ?? existing.PORT ?? "3456";
     (answers as any).NGROK_DOMAIN = "";
+    (answers as any).PUBLIC_URL = `http://localhost:${localPort}`;
+    (answers as any).SENDBLUE_WEBHOOK_EXCLUSIVE = "true";
   }
 
   const env: Record<string, string> = { ...existing, ...answers };
@@ -956,6 +1004,9 @@ ${claudeInstalled ? "✓ Claude Code found on PATH." : "⚠ Claude Code was not 
 
   if (answers.runConvex) {
     await runConvexDev();
+    await syncConvexInboxCapability(
+      deriveSendblueInboxCapability(sendblueDefaults.SENDBLUE_INBOX_KEY),
+    );
     const after = readEnv(ENV_PATH);
 
     // VITE_CONVEX_URL is written to .env.local as part of `convex dev`. The
@@ -990,26 +1041,17 @@ Before you start: install ngrok (one-time).
   # or download:  https://ngrok.com/download
   ngrok config add-authtoken <your-token>      # free at https://dashboard.ngrok.com
 
-⚠ ngrok's FREE plan gives you a NEW URL every restart. That means
-  re-pasting into Sendblue every time.  For anything beyond a demo,
-  use a stable URL:
-    • ngrok paid plan (reserved domain), or
-    • Cloudflare Tunnel: https://developers.cloudflare.com/cloudflare-one/connections/connect-networks/
+The free plan is enough: ngrok assigns the development domain and Boop
+synchronizes the signed Sendblue webhook automatically on every start.
 
 Then run ONE command:
 
   npm run dev
 
-That starts the server, Convex watcher, debug dashboard, AND ngrok all
-together — color-prefixed output so you can tell who's saying what. Once
-the tunnel is live, you'll see a banner with your public URL.
-
-Wire up Sendblue (one-time, takes ~30 seconds):
-
-  1. Copy the "Sendblue webhook" URL printed by ngrok.
-  2. Sendblue dashboard → API Settings → Webhook Configuration
-  3. Add it as an INBOUND MESSAGE webhook.
-  4. Paste the URL. Save.
+That starts the server, Convex watcher, debug dashboard, AND ngrok together.
+Once the tunnel is live, Boop registers it with Sendblue and prints the URL.
+Only the signed Sendblue and Composio webhook routes are public; the dashboard,
+chat API, browser controls, and all other server routes stay local.
 
 Test it:
   • Open http://localhost:5173 for the debug dashboard (Chat tab works

@@ -4,7 +4,7 @@ import cors from "cors";
 import { createServer } from "node:http";
 import { WebSocketServer } from "ws";
 import { addClient } from "./broadcast.js";
-import { createSendblueRouter } from "./sendblue.js";
+import { createSendblueRouter, startSendblueInboxLoop } from "./sendblue.js";
 import { handleUserMessage } from "./interaction-agent.js";
 import { loadIntegrations } from "./integrations/registry.js";
 import { startCleanupLoop } from "./memory/clean.js";
@@ -31,6 +31,19 @@ import {
 } from "./runtime-config.js";
 import { startImageCleanup } from "./images/clean.js";
 import { isPublicServerRequest, isTrustedLocalRequest } from "./local-access.js";
+import { getCodexModelCatalog } from "./codex-model-service.js";
+
+async function runtimeConfigPayload() {
+  const config = await getRuntimeConfig();
+  if (config.runtime !== "codex") return config;
+
+  const catalog = await getCodexModelCatalog();
+  return {
+    ...config,
+    codexModels: catalog.models,
+    codexModelCatalogSource: catalog.source,
+  };
+}
 
 async function main() {
   await loadIntegrations();
@@ -39,6 +52,7 @@ async function main() {
   startHeartbeatLoop();
   startConsolidationLoop();
   startImageCleanup();
+  startSendblueInboxLoop();
   // No-op when a paid embedding key is set; otherwise downloads/loads the
   // local BGE-large model in the background so the first user-facing
   // recall() doesn't pay the model-load cost.
@@ -77,7 +91,7 @@ async function main() {
 
   app.get("/runtime-config", async (_req, res) => {
     try {
-      res.json(await getRuntimeConfig());
+      res.json(await runtimeConfigPayload());
     } catch (err) {
       res.status(500).json({ error: String(err) });
     }
@@ -127,7 +141,7 @@ async function main() {
         await setCodexReasoningEffort(effort);
       }
 
-      res.json(await getRuntimeConfig());
+      res.json(await runtimeConfigPayload());
     } catch (err) {
       res.status(500).json({ error: String(err) });
     }
