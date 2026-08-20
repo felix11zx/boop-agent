@@ -224,7 +224,7 @@ export function App() {
         ? storedHostedModel
         : storedClaudeModel
       : undefined) ??
-    (demoModeEnabled ? "gpt-5.5" : undefined) ??
+    (demoModeEnabled ? "gpt-5.6-sol" : undefined) ??
     (runtimeConfig === undefined ? "Checking..." : "Model unavailable");
   const inDesktopShell = desktopStatus !== null;
   const displayDesktopStatus =

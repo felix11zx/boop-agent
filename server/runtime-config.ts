@@ -1,5 +1,10 @@
 import { api } from "../convex/_generated/api.js";
 import { convex } from "./convex-client.js";
+import {
+  CODEX_MODEL_IDS,
+  DEFAULT_CODEX_MODEL,
+  reasoningEffortsForCodexModel,
+} from "./codex-model-catalog.js";
 import type { RuntimeName, RuntimeReasoningEffort } from "./runtimes/types.js";
 import { homedir } from "node:os";
 import { join } from "node:path";
@@ -93,27 +98,29 @@ export const KNOWN_MODELS = new Set<string>([
 ]);
 
 export const CODEX_MODEL_ALIASES: Record<string, string> = {
+  "5.6": "gpt-5.6-sol",
+  "gpt 5.6": "gpt-5.6-sol",
+  "gpt-5.6": "gpt-5.6-sol",
+  sol: "gpt-5.6-sol",
+  "5.6 sol": "gpt-5.6-sol",
+  "gpt 5.6 sol": "gpt-5.6-sol",
+  "gpt-5.6-sol": "gpt-5.6-sol",
+  terra: "gpt-5.6-terra",
+  "5.6 terra": "gpt-5.6-terra",
+  "gpt 5.6 terra": "gpt-5.6-terra",
+  "gpt-5.6-terra": "gpt-5.6-terra",
+  luna: "gpt-5.6-luna",
+  mini: "gpt-5.6-luna",
+  "5.6 luna": "gpt-5.6-luna",
+  "gpt 5.6 luna": "gpt-5.6-luna",
+  "gpt-5.6-luna": "gpt-5.6-luna",
+  codex: "gpt-5.6-sol",
   "5.5": "gpt-5.5",
   "gpt 5.5": "gpt-5.5",
   "gpt-5.5": "gpt-5.5",
-  "5.4": "gpt-5.4",
-  "gpt 5.4": "gpt-5.4",
-  "gpt-5.4": "gpt-5.4",
-  mini: "gpt-5.4-mini",
-  "5.4 mini": "gpt-5.4-mini",
-  "gpt-5.4-mini": "gpt-5.4-mini",
-  codex: "gpt-5.3-codex",
-  "5.3 codex": "gpt-5.3-codex",
-  "gpt-5.3-codex": "gpt-5.3-codex",
 };
 
-export const KNOWN_CODEX_MODELS = new Set<string>([
-  "gpt-5.5",
-  "gpt-5.4",
-  "gpt-5.4-mini",
-  "gpt-5.3-codex",
-  "gpt-5.2",
-]);
+export const KNOWN_CODEX_MODELS = new Set<string>(CODEX_MODEL_IDS);
 
 const KNOWN_REASONING_EFFORTS = new Set<RuntimeReasoningEffort>([
   "minimal",
@@ -121,6 +128,7 @@ const KNOWN_REASONING_EFFORTS = new Set<RuntimeReasoningEffort>([
   "medium",
   "high",
   "xhigh",
+  "max",
 ]);
 
 export function resolveRuntimeInput(input: string): RuntimeName | null {
@@ -150,15 +158,25 @@ function claudeEnvFallback(): string {
 }
 
 function codexEnvFallback(): string {
-  return process.env.BOOP_CODEX_MODEL ?? "gpt-5.5";
+  return (
+    resolveModelInput(process.env.BOOP_CODEX_MODEL ?? "", "codex") ??
+    DEFAULT_CODEX_MODEL
+  );
 }
 
-function resolveReasoningEffort(input: string | null): RuntimeReasoningEffort {
-  return (
+function resolveReasoningEffort(
+  input: string | null,
+  model: string,
+): RuntimeReasoningEffort {
+  let effort =
     resolveReasoningEffortInput(
       input ?? process.env.BOOP_CODEX_REASONING_EFFORT ?? "medium",
-    ) ?? "medium"
-  );
+    ) ?? "medium";
+  if (effort === "minimal") effort = "low";
+
+  const supported = reasoningEffortsForCodexModel(model);
+  if (supported.includes(effort)) return effort;
+  return supported.includes("medium") ? "medium" : (supported[0] ?? "medium");
 }
 
 export function resolveReasoningEffortInput(
@@ -219,7 +237,10 @@ export async function getRuntimeConfig(): Promise<RuntimeConfig> {
   if (runtime === "codex") {
     const stored = await getSetting(CODEX_MODEL_KEY);
     model = stored && KNOWN_CODEX_MODELS.has(stored) ? stored : codexEnvFallback();
-    reasoningEffort = resolveReasoningEffort(await getSetting(CODEX_REASONING_EFFORT_KEY));
+    reasoningEffort = resolveReasoningEffort(
+      await getSetting(CODEX_REASONING_EFFORT_KEY),
+      model,
+    );
     billingMode = "codex-subscription";
   } else {
     const stored = await getSetting(CLAUDE_MODEL_KEY);

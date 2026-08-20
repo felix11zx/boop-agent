@@ -12,11 +12,16 @@ import { AppleSection } from "./AppleSection.js";
 import { BrowserSection } from "./BrowserSection.js";
 
 type RuntimeChoice = "claude" | "codex";
-type ReasoningEffort = "minimal" | "low" | "medium" | "high" | "xhigh";
+type ReasoningEffort = "minimal" | "low" | "medium" | "high" | "xhigh" | "max";
 
 interface Option<T extends string = string> {
   value: T;
   label: string;
+}
+
+interface CodexModelOption extends Option {
+  supportedReasoningEfforts: ReasoningEffort[];
+  isDefault: boolean;
 }
 
 interface RuntimeConfigSnapshot {
@@ -24,6 +29,8 @@ interface RuntimeConfigSnapshot {
   model: string;
   reasoningEffort?: ReasoningEffort;
   billingMode: "api" | "codex-subscription";
+  codexModels?: CodexModelOption[];
+  codexModelCatalogSource?: "codex-account" | "fallback";
 }
 
 interface ConnectionConfigSnapshot {
@@ -80,21 +87,41 @@ const CLAUDE_MODELS: Option[] = [
   { value: "claude-haiku-4-5-20251001", label: "Haiku 4.5" },
 ];
 
-const CODEX_MODELS: Option[] = [
-  { value: "gpt-5.5", label: "GPT-5.5" },
-  { value: "gpt-5.4", label: "GPT-5.4" },
-  { value: "gpt-5.4-mini", label: "GPT-5.4 Mini" },
-  { value: "gpt-5.3-codex", label: "GPT-5.3 Agent" },
-  { value: "gpt-5.2", label: "GPT-5.2" },
+const CODEX_MODELS: CodexModelOption[] = [
+  {
+    value: "gpt-5.6-sol",
+    label: "GPT-5.6 Sol",
+    supportedReasoningEfforts: ["low", "medium", "high", "xhigh", "max"],
+    isDefault: true,
+  },
+  {
+    value: "gpt-5.6-terra",
+    label: "GPT-5.6 Terra",
+    supportedReasoningEfforts: ["low", "medium", "high", "xhigh", "max"],
+    isDefault: false,
+  },
+  {
+    value: "gpt-5.6-luna",
+    label: "GPT-5.6 Luna",
+    supportedReasoningEfforts: ["low", "medium", "high", "xhigh", "max"],
+    isDefault: false,
+  },
+  {
+    value: "gpt-5.5",
+    label: "GPT-5.5",
+    supportedReasoningEfforts: ["low", "medium", "high", "xhigh"],
+    isDefault: false,
+  },
 ];
 
-const CODEX_REASONING_EFFORTS: Option<ReasoningEffort>[] = [
-  { value: "minimal", label: "Minimal" },
-  { value: "low", label: "Low" },
-  { value: "medium", label: "Medium" },
-  { value: "high", label: "High" },
-  { value: "xhigh", label: "XHigh" },
-];
+const REASONING_LABELS: Record<ReasoningEffort, string> = {
+  minimal: "Minimal",
+  low: "Low",
+  medium: "Medium",
+  high: "High",
+  xhigh: "XHigh",
+  max: "Max",
+};
 
 // A short curated list for the dropdown, covering most US users plus a few
 // common international zones. The text input next to the dropdown lets the
@@ -614,7 +641,11 @@ function RuntimeRow({ isDark }: { isDark: boolean }) {
     serverConfig?.runtime ??
     (storedRuntime === "claude" || storedRuntime === "codex" ? storedRuntime : "claude");
 
-  const activeModelOptions = runtime === "codex" ? CODEX_MODELS : CLAUDE_MODELS;
+  const codexModelOptions =
+    serverConfig?.codexModels && serverConfig.codexModels.length > 0
+      ? serverConfig.codexModels
+      : CODEX_MODELS;
+  const activeModelOptions = runtime === "codex" ? codexModelOptions : CLAUDE_MODELS;
   const modelKey = runtime === "codex" ? "codex_model" : "model";
   const storedModel = runtime === "codex" ? storedHostedModel : storedClaudeModel;
   const firstModelValue = activeModelOptions[0]?.value ?? "";
@@ -625,10 +656,29 @@ function RuntimeRow({ isDark }: { isDark: boolean }) {
       ? optionValue(serverConfig.model, activeModelOptions, firstModelValue)
       : firstModelValue;
   const activeModel = optionValue(storedModel, activeModelOptions, modelFallback);
+  const activeCodexModel =
+    runtime === "codex"
+      ? codexModelOptions.find((option) => option.value === activeModel)
+      : codexModelOptions.find((option) => option.value === storedHostedModel) ??
+        codexModelOptions[0];
+  const supportedReasoningEfforts =
+    activeCodexModel?.supportedReasoningEfforts.length
+      ? activeCodexModel.supportedReasoningEfforts
+      : (["medium"] as ReasoningEffort[]);
+  const reasoningOptions: Option<ReasoningEffort>[] = supportedReasoningEfforts.map(
+    (value) => ({ value, label: REASONING_LABELS[value] }),
+  );
+  const serverReasoningFallback =
+    serverConfig?.reasoningEffort &&
+    supportedReasoningEfforts.includes(serverConfig.reasoningEffort)
+      ? serverConfig.reasoningEffort
+      : supportedReasoningEfforts.includes("medium")
+        ? "medium"
+        : supportedReasoningEfforts[0];
   const reasoningEffort = optionValue(
     storedHostedEffort,
-    CODEX_REASONING_EFFORTS,
-    serverConfig?.reasoningEffort ?? "medium",
+    reasoningOptions,
+    serverReasoningFallback ?? "medium",
   );
 
   async function savePatch(
@@ -665,6 +715,9 @@ function RuntimeRow({ isDark }: { isDark: boolean }) {
         serverConfig?.reasoningEffort ?? "medium",
       ),
     );
+    if (serverConfig?.codexModelCatalogSource) {
+      debugParts.push(`models: ${serverConfig.codexModelCatalogSource}`);
+    }
   }
   debugParts.push(`billing: ${serverConfig?.billingMode ?? "…"}`);
 
@@ -725,12 +778,27 @@ function RuntimeRow({ isDark }: { isDark: boolean }) {
               <select
                 value={activeModel}
                 disabled={saving !== null || storedModel === undefined}
-                onChange={(e) =>
-                  savePatch(`${modelKey}:${e.target.value}`, {
+                onChange={(e) => {
+                  const nextModel = e.target.value;
+                  const nextModelOption = codexModelOptions.find(
+                    (option) => option.value === nextModel,
+                  );
+                  const nextReasoningEffort =
+                    runtime === "codex" &&
+                    nextModelOption &&
+                    !nextModelOption.supportedReasoningEfforts.includes(reasoningEffort)
+                      ? nextModelOption.supportedReasoningEfforts.includes("medium")
+                        ? "medium"
+                        : nextModelOption.supportedReasoningEfforts[0]
+                      : undefined;
+                  savePatch(`${modelKey}:${nextModel}`, {
                     runtime,
-                    model: e.target.value,
-                  })
-                }
+                    model: nextModel,
+                    ...(nextReasoningEffort
+                      ? { reasoningEffort: nextReasoningEffort }
+                      : {}),
+                  });
+                }}
                 className={`w-full rounded-xl border px-3 py-2 text-xs outline-none transition-colors focus:border-zinc-400 ${inputBg}`}
               >
                 {activeModelOptions.map((option) => (
@@ -764,7 +832,7 @@ function RuntimeRow({ isDark }: { isDark: boolean }) {
                 }
                 className={`w-full rounded-xl border px-3 py-2 text-xs outline-none transition-colors focus:border-zinc-400 disabled:opacity-50 ${inputBg}`}
               >
-                {CODEX_REASONING_EFFORTS.map((option) => (
+                {reasoningOptions.map((option) => (
                   <option key={option.value} value={option.value}>
                     {option.label}
                   </option>

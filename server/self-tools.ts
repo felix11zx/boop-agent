@@ -11,6 +11,10 @@ import { createClaudeMcpServer } from "./runtimes/claude.js";
 import { defineRuntimeTool } from "./runtimes/tool.js";
 import { runtimeText, type RuntimeReasoningEffort, type RuntimeTool } from "./runtimes/types.js";
 import {
+  DEFAULT_CODEX_MODEL,
+  reasoningEffortsForCodexModel,
+} from "./codex-model-catalog.js";
+import {
   CODEX_MODEL_ALIASES,
   KNOWN_CODEX_MODELS,
   KNOWN_MODELS,
@@ -32,7 +36,7 @@ import {
 
 const NAMESPACE = "boop-self";
 
-const reasoningEffortSchema = z.enum(["minimal", "low", "medium", "high", "xhigh"]);
+const reasoningEffortSchema = z.enum(["low", "medium", "high", "xhigh", "max"]);
 
 export function createSelfTools(): RuntimeTool[] {
   return [
@@ -52,7 +56,7 @@ export function createSelfTools(): RuntimeTool[] {
           reasoningEffort: runtime.reasoningEffort ?? null,
           billingMode: runtime.billingMode,
           claudeEnvDefault: process.env.BOOP_MODEL ?? "claude-sonnet-4-6",
-          codexEnvDefault: process.env.BOOP_CODEX_MODEL ?? "gpt-5.5",
+          codexEnvDefault: process.env.BOOP_CODEX_MODEL ?? DEFAULT_CODEX_MODEL,
           availableClaudeModels: [...KNOWN_MODELS],
           availableCodexModels: [...KNOWN_CODEX_MODELS],
           userTimezone: tzInfo.isExplicit ? tzInfo.timezone : null,
@@ -137,11 +141,11 @@ Claude canonical: ${[...KNOWN_MODELS].map((k) => `"${k}"`).join(", ")}
 Codex aliases: ${Object.keys(CODEX_MODEL_ALIASES).map((k) => `"${k}"`).join(", ")}
 Codex canonical: ${[...KNOWN_CODEX_MODELS].map((k) => `"${k}"`).join(", ")}
 
-Use when the user says "use opus", "switch to sonnet", "use Codex mini", "make it faster", etc.`,
+Use when the user says "use opus", "switch to sonnet", "use Luna", "make it faster", etc.`,
       {
         model: z
           .string()
-          .describe('Model to use. Canonical ID like "claude-opus-4-7" or "gpt-5.4-mini", or an alias.'),
+          .describe('Model to use. Canonical ID like "claude-opus-4-7" or "gpt-5.6-luna", or an alias.'),
       },
       async ({ model }) => {
         const runtime = (await getRuntimeConfig()).runtime;
@@ -163,9 +167,17 @@ Use when the user says "use opus", "switch to sonnet", "use Codex mini", "make i
     defineRuntimeTool(
       NAMESPACE,
       "set_codex_reasoning_effort",
-      "Set Codex reasoning effort for future Codex turns. Use low for speed, medium for default work, high/xhigh for deeper work.",
+      "Set Codex reasoning effort for future Codex turns. Use low for speed, medium for default work, high/xhigh for deeper work, or max for the hardest GPT-5.6 tasks.",
       { effort: reasoningEffortSchema },
       async ({ effort }) => {
+        const config = await getRuntimeConfig();
+        const supported = reasoningEffortsForCodexModel(config.model);
+        if (config.runtime === "codex" && !supported.includes(effort)) {
+          return runtimeText(
+            `${config.model} does not support ${effort}. Supported efforts: ${supported.join(", ")}.`,
+            false,
+          );
+        }
         await setCodexReasoningEffort(effort as RuntimeReasoningEffort);
         return runtimeText(`Codex reasoning effort set to ${effort}. Next Codex turn will use it.`);
       },

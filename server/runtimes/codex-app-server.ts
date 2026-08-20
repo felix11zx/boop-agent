@@ -20,6 +20,8 @@ import type { RequestId } from "./codex-app-server-protocol/RequestId.js";
 import type { ServerNotification } from "./codex-app-server-protocol/ServerNotification.js";
 import type { ServerRequest } from "./codex-app-server-protocol/ServerRequest.js";
 import type { DynamicToolCallResponse } from "./codex-app-server-protocol/v2/DynamicToolCallResponse.js";
+import type { Model } from "./codex-app-server-protocol/v2/Model.js";
+import type { ModelListResponse } from "./codex-app-server-protocol/v2/ModelListResponse.js";
 import type { SandboxPolicy } from "./codex-app-server-protocol/v2/SandboxPolicy.js";
 import type { ThreadStartParams } from "./codex-app-server-protocol/v2/ThreadStartParams.js";
 import type { ThreadStartResponse } from "./codex-app-server-protocol/v2/ThreadStartResponse.js";
@@ -29,6 +31,7 @@ import type { UserInput } from "./codex-app-server-protocol/v2/UserInput.js";
 import type { RuntimeRunRequest, RuntimeRunResult, RuntimeTool } from "./types.js";
 import { EMPTY_USAGE, estimateOpenAiCostUsd, type UsageTotals } from "../usage.js";
 import { formatError } from "../error-format.js";
+import { DEFAULT_CODEX_MODEL } from "../codex-model-catalog.js";
 
 type ClientRequestForMethod<M extends ClientRequest["method"]> = Extract<
   ClientRequest,
@@ -77,7 +80,7 @@ function createIsolatedCodexHome(): string {
   writeFileSync(
     join(codexHome, "config.toml"),
     [
-      'model = "gpt-5.5"',
+      `model = "${DEFAULT_CODEX_MODEL}"`,
       'approval_policy = "never"',
       'sandbox_mode = "read-only"',
       'web_search = "disabled"',
@@ -85,6 +88,106 @@ function createIsolatedCodexHome(): string {
     ].join("\n"),
   );
   return codexHome;
+}
+
+/** Query the model picker exposed by the user's locally authenticated Codex. */
+export async function queryCodexAppServerModels(timeoutMs = 12_000): Promise<Model[]> {
+  const spawned = spawnCodexAppServer();
+  const { child, codexHome } = spawned;
+  const pending = new Map<RequestId, Pending<any>>();
+  const stdout = readline.createInterface({ input: child.stdout });
+  let nextId = 1;
+  let stderr = "";
+
+  const call = <Result>(method: string, params: unknown): Promise<Result> => {
+    const id = nextId++;
+    const promise = new Promise<Result>((resolve, reject) => {
+      pending.set(id, {
+        resolve: (value) => resolve(value as Result),
+        reject,
+      });
+    });
+    child.stdin.write(`${JSON.stringify({ id, method, params })}\n`);
+    return promise;
+  };
+
+  stdout.on("line", (line) => {
+    let message: CodexServerMessage;
+    try {
+      message = JSON.parse(line) as CodexServerMessage;
+    } catch {
+      return;
+    }
+    if (isJsonRpcResponse(message)) {
+      const request = pending.get(message.id);
+      if (!request) return;
+      pending.delete(message.id);
+      if (message.error) request.reject(new Error(formatError(message.error)));
+      else request.resolve(message.result);
+      return;
+    }
+    if (isServerRequest(message)) {
+      child.stdin.write(`${JSON.stringify({ id: message.id, result: null })}\n`);
+    }
+  });
+  child.stderr.on("data", (chunk) => {
+    stderr = `${stderr}${chunk.toString()}`.slice(-4000);
+  });
+  const rejectPending = (reason: unknown) => {
+    for (const request of pending.values()) request.reject(reason);
+    pending.clear();
+  };
+  child.on("error", rejectPending);
+  child.on("exit", (code, signal) => {
+    rejectPending(
+      new Error(
+        `codex app-server exited while listing models (${code ?? signal ?? "unknown"})${
+          stderr.trim() ? `: ${stderr.trim()}` : ""
+        }`,
+      ),
+    );
+  });
+
+  let timeout: ReturnType<typeof setTimeout> | null = null;
+  try {
+    const load = (async () => {
+      await call<InitializeResponse>("initialize", {
+        clientInfo: { name: "boop-agent", title: "Boop Agent", version: "0.2.0" },
+        capabilities: { experimentalApi: true },
+      });
+      child.stdin.write(`${JSON.stringify({ method: "initialized" })}\n`);
+
+      const models: Model[] = [];
+      let cursor: string | null = null;
+      do {
+        const page: ModelListResponse = await call<ModelListResponse>("model/list", {
+          cursor,
+          limit: 100,
+          includeHidden: true,
+        });
+        models.push(...page.data);
+        cursor = page.nextCursor;
+      } while (cursor);
+      return models;
+    })();
+
+    const timedOut = new Promise<never>((_resolve, reject) => {
+      timeout = setTimeout(
+        () => reject(new Error(`Codex model/list timed out after ${timeoutMs}ms`)),
+        timeoutMs,
+      );
+    });
+    return await Promise.race([load, timedOut]);
+  } finally {
+    if (timeout) clearTimeout(timeout);
+    stdout.close();
+    if (!child.killed) child.kill();
+    await Promise.race([
+      once(child, "exit").catch(() => undefined),
+      new Promise((resolve) => setTimeout(resolve, 1000)),
+    ]);
+    rmSync(codexHome, { recursive: true, force: true });
+  }
 }
 
 function spawnCodexAppServer(): {
@@ -155,7 +258,9 @@ function codexReasoningEffort(
   // broader protocol type includes it. Keep Boop's shared runtime setting
   // portable by choosing the nearest supported Codex value.
   if (effort === "minimal") return "low";
-  return effort ?? "medium";
+  // Current app-server model metadata advertises `max` for GPT-5.6. Older
+  // generated protocol snapshots used a closed union that predates it.
+  return (effort ?? "medium") as TurnStartParams["effort"];
 }
 
 const CODEX_USER_FACING_VOICE_OVERLAY = `Codex runtime voice override:
@@ -243,6 +348,7 @@ class CodexAppServerClient {
   private currentAgentMessageId = "";
   private currentAgentMessageText = "";
   private usage: UsageTotals = { ...EMPTY_USAGE };
+  private pendingCallbacks = new Set<Promise<void>>();
 
   async run(request: RuntimeRunRequest): Promise<RuntimeRunResult> {
     this.request = request;
@@ -259,6 +365,7 @@ class CodexAppServerClient {
     this.currentAgentMessageId = "";
     this.currentAgentMessageText = "";
     this.usage = { ...EMPTY_USAGE, model: request.model };
+    this.pendingCallbacks.clear();
     const spawned = spawnCodexAppServer();
     this.child = spawned.child;
     this.codexHome = spawned.codexHome;
@@ -333,7 +440,7 @@ class CodexAppServerClient {
       const turnId = String(turnResponse.turn.id);
       if (turnCompletion && this.turnCompletion === turnCompletion) {
         turnCompletion.turnId = turnId;
-        if (this.completedTurns.has(turnId)) turnCompletion.resolve();
+        if (this.completedTurns.has(turnId)) this.completeTurn(turnId);
       }
       await turnWait;
       return { text: this.reply, usage: this.usage };
@@ -407,14 +514,11 @@ class CodexAppServerClient {
       }
       this.currentAgentMessageText += delta;
       this.reply = this.currentAgentMessageText || this.reply;
-      void this.request?.onText?.(delta);
+      this.trackCallback(() => this.request?.onText?.(delta));
     } else if (message.method === "turn/completed") {
       const turnId = message.params.turn.id;
       if (turnId) this.completedTurns.add(turnId);
-      if (!this.turnCompletion?.turnId || this.turnCompletion.turnId === turnId) {
-        this.turnCompletion?.resolve();
-        this.turnCompletion = null;
-      }
+      this.completeTurn(turnId);
     } else if (message.method === "thread/tokenUsage/updated") {
       const usage = message.params.tokenUsage.total;
       if (usage) {
@@ -428,7 +532,7 @@ class CodexAppServerClient {
         };
         nextUsage.costUsd = estimateOpenAiCostUsd(nextUsage);
         this.usage = nextUsage;
-        void this.request?.onUsage?.(nextUsage);
+        this.trackCallback(() => this.request?.onUsage?.(nextUsage));
       }
     } else if (message.method === "error") {
       this.turnCompletion?.reject(new Error(formatError(message.params.error)));
@@ -498,6 +602,38 @@ class CodexAppServerClient {
     return new Promise((resolve, reject) => {
       this.turnCompletion = { turnId: "", resolve, reject };
     });
+  }
+
+  private trackCallback(callback: () => void | Promise<void> | undefined): void {
+    const pending = Promise.resolve().then(callback);
+    this.pendingCallbacks.add(pending);
+    void pending.then(
+      () => this.pendingCallbacks.delete(pending),
+      (err) => {
+        this.pendingCallbacks.delete(pending);
+        this.failTurn(err);
+      },
+    );
+  }
+
+  private completeTurn(turnId: string): void {
+    const completion = this.turnCompletion;
+    if (!completion || (completion.turnId && completion.turnId !== turnId)) return;
+    void Promise.all([...this.pendingCallbacks]).then(
+      () => {
+        if (this.turnCompletion !== completion) return;
+        this.turnCompletion = null;
+        completion.resolve();
+      },
+      (err) => this.failTurn(err),
+    );
+  }
+
+  private failTurn(reason: unknown): void {
+    const completion = this.turnCompletion;
+    if (!completion) return;
+    this.turnCompletion = null;
+    completion.reject(reason);
   }
 
   private async close(): Promise<void> {
