@@ -4,13 +4,15 @@
 // tunnel URL rotates.
 //
 // Usage:
-//   node scripts/sendblue-webhook.mjs <public-webhook-url>
-//   node scripts/sendblue-webhook.mjs --check [public-webhook-url]
+//   node scripts/sendblue-webhook.mjs [--exclusive] <public-webhook-url>
+//   node scripts/sendblue-webhook.mjs --check [--exclusive] [public-webhook-url]
 //
 // Behavior:
 //   1. Uses the Sendblue API keys in .env.local (falling back to .env) to list current inbound hooks.
 //   2. Removes any stale *.ngrok-free.app / *.ngrok-free.dev / *.ngrok.app / trycloudflare.com
 //      webhooks of type=receive that don't match the new URL.
+//      With --exclusive, removes every other receive URL (including an old
+//      static/Tailscale URL) so inbound messages have one destination.
 //   3. Adds the new URL as type=receive (unless already registered).
 
 import { spawn } from "node:child_process";
@@ -355,7 +357,15 @@ async function listWebhooks(env) {
   };
 }
 
-export function webhookCheck(url, current, source, signingReady, warning = "") {
+export function webhookCheck(
+  url,
+  current,
+  source,
+  signingReady,
+  warning = "",
+  options = {},
+) {
+  const exclusive = options.exclusive === true;
   const receive = current.filter((wh) => wh.type === "receive");
   const currentMatches = receive.filter((wh) => wh.url === url);
   const staleReceiveWebhooks = receive
@@ -364,9 +374,14 @@ export function webhookCheck(url, current, source, signingReady, warning = "") {
   const otherReceiveWebhooks = receive
     .map((wh) => wh.url)
     .filter((hookUrl) => hookUrl !== url && !STALE_DOMAIN_RE.test(hookUrl));
-  const state = currentMatches.length > 0 && signingReady
+  const hasUnexpectedHooks =
+    staleReceiveWebhooks.length > 0 || (exclusive && otherReceiveWebhooks.length > 0);
+  const ok = currentMatches.length > 0 && signingReady && !hasUnexpectedHooks;
+  const state = ok
     ? "registered"
-    : currentMatches.length > 0 || staleReceiveWebhooks.length > 0
+    : currentMatches.length > 0 ||
+        staleReceiveWebhooks.length > 0 ||
+        (exclusive && otherReceiveWebhooks.length > 0)
       ? "mismatch"
       : "missing";
   const detailParts = [];
@@ -383,12 +398,16 @@ export function webhookCheck(url, current, source, signingReady, warning = "") {
   if (staleReceiveWebhooks.length) {
     detailParts.push(`${staleReceiveWebhooks.length} stale tunnel hook(s) still registered`);
   }
+  if (exclusive && otherReceiveWebhooks.length) {
+    detailParts.push(`${otherReceiveWebhooks.length} other receive hook(s) still registered`);
+  }
   if (warning) detailParts.push(warning);
 
   return {
-    ok: currentMatches.length > 0 && signingReady,
+    ok,
     state,
     source,
+    exclusive,
     checkedAt: new Date().toISOString(),
     expectedWebhookUrl: url,
     registeredWebhookUrl: currentMatches[0]?.url || staleReceiveWebhooks[0] || "",
@@ -412,37 +431,52 @@ function printWebhookCheck(check) {
   console.log(`[webhook] details: ${check.details}`);
 }
 
-export async function syncWebhooks(url, current, removeWebhook, addWebhook) {
+export async function syncWebhooks(
+  url,
+  current,
+  removeWebhook,
+  addWebhook,
+  options = {},
+) {
+  const exclusive = options.exclusive === true;
   const hasTarget = current.some((wh) => wh.type === "receive" && wh.url === url);
 
-  // 1. Remove stale ngrok/tunnel URLs so we don't accumulate zombie hooks.
+  // 1. Register the replacement before cleanup, so a failed add never removes
+  // the last working receive destination.
+  if (hasTarget) {
+    console.log(`[webhook] already registered: ${url}`);
+  } else {
+    await addWebhook(url);
+    console.log(`[webhook] registered ${url} (type=receive)`);
+  }
+
+  // 2. Remove stale ngrok/tunnel URLs so we don't accumulate zombie hooks.
+  // Exclusive mode also removes old static URLs such as Tailscale Funnel.
   // Keep duplicate copies of the current URL. Sendblue's delete endpoint is
   // URL-based and may remove every matching row, which would turn a harmless
   // duplicate into a missing webhook during app restart.
-  for (const wh of current) {
-    if (wh.type !== "receive") continue;
-    if (wh.url === url) continue;
-    if (!STALE_DOMAIN_RE.test(wh.url)) continue;
+  const removableUrls = new Set(
+    current
+      .filter((wh) => wh.type === "receive" && wh.url !== url)
+      .map((wh) => wh.url)
+      .filter((hookUrl) => exclusive || STALE_DOMAIN_RE.test(hookUrl)),
+  );
+  const removalErrors = [];
+  for (const oldUrl of removableUrls) {
     try {
-      await removeWebhook(wh.url);
-      console.log(`[webhook] removed stale ${wh.url}`);
+      await removeWebhook(oldUrl);
+      console.log(
+        exclusive
+          ? `[webhook] removed previous receive hook ${oldUrl}`
+          : `[webhook] removed stale ${oldUrl}`,
+      );
     } catch (err) {
-      console.warn(`[webhook] could not remove ${wh.url}: ${err.message}`);
+      removalErrors.push({ url: oldUrl, error: err });
+      console.warn(`[webhook] could not remove ${oldUrl}: ${err.message}`);
     }
   }
-
-  // 2. Skip if already registered.
-  if (hasTarget) {
-    console.log(`[webhook] already registered: ${url}`);
-    return;
-  }
-
-  // 3. Register new.
-  try {
-    await addWebhook(url);
-    console.log(`[webhook] registered ${url} (type=receive)`);
-  } catch (err) {
-    console.error(`[webhook] failed to register ${url}: ${err.message}`);
+  if (removalErrors.length > 0) {
+    throw new Error(`failed to remove ${removalErrors.length} old receive webhook(s)`);
   }
 }
 
@@ -452,6 +486,8 @@ async function main() {
   const json = args.includes("--json");
   const urlArg = args.find((arg) => !arg.startsWith("--"));
   const env = readEnvFiles();
+  const exclusive =
+    args.includes("--exclusive") || env.SENDBLUE_WEBHOOK_EXCLUSIVE === "true";
   const url = checkOnly ? await expectedWebhookUrl(env, urlArg) : urlArg;
 
   if (checkOnly && !url) {
@@ -459,6 +495,7 @@ async function main() {
       ok: false,
       state: "no-tunnel",
       source: "none",
+      exclusive,
       checkedAt: new Date().toISOString(),
       expectedWebhookUrl: "",
       registeredWebhookUrl: "",
@@ -478,8 +515,10 @@ async function main() {
   }
 
   if (!url || !/^https?:\/\//.test(url)) {
-    console.error("Usage: node scripts/sendblue-webhook.mjs <public-webhook-url>");
-    console.error("   or: node scripts/sendblue-webhook.mjs --check [public-webhook-url]");
+    console.error("Usage: node scripts/sendblue-webhook.mjs [--exclusive] <public-webhook-url>");
+    console.error(
+      "   or: node scripts/sendblue-webhook.mjs --check [--exclusive] [public-webhook-url]",
+    );
     process.exit(1);
   }
 
@@ -488,7 +527,9 @@ async function main() {
   if (checkOnly) {
     try {
       const { current, source, signingReady, warning } = await listWebhooks(env);
-      const result = webhookCheck(webhookUrl, current, source, signingReady, warning);
+      const result = webhookCheck(webhookUrl, current, source, signingReady, warning, {
+        exclusive,
+      });
       if (json) {
         console.log(JSON.stringify(result));
       } else {
@@ -500,6 +541,7 @@ async function main() {
         ok: false,
         state: "error",
         source: "none",
+        exclusive,
         checkedAt: new Date().toISOString(),
         expectedWebhookUrl: webhookUrl,
         registeredWebhookUrl: "",
@@ -537,6 +579,7 @@ async function main() {
         listing.current,
         (hookUrl) => apiRemoveWebhook(env, hookUrl),
         (hookUrl) => apiAddWebhook(env, hookUrl),
+        { exclusive },
       );
       return;
     } catch (err) {

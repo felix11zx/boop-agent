@@ -7,6 +7,7 @@ import { existsSync, readFileSync, unlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+import { createNgrokTrafficPolicy } from "./ngrok-traffic-policy.mjs";
 
 const here = dirname(fileURLToPath(import.meta.url));
 const root = resolve(here, "..");
@@ -43,7 +44,9 @@ const publicUrl = envVars.PUBLIC_URL || "";
 const hasStaticUrl =
   publicUrl && !publicUrl.includes("localhost") && !publicUrl.includes("127.0.0.1");
 const useNgrok = !hasStaticUrl || Boolean(ngrokDomain);
+const exclusiveSendblueWebhook = envVars.SENDBLUE_WEBHOOK_EXCLUSIVE === "true";
 let convexEnvFile = null;
+let ngrokTrafficPolicyFile = null;
 
 function writeConvexDevEnvFile() {
   const convexUrl = envVars.VITE_CONVEX_URL || envVars.CONVEX_URL;
@@ -59,6 +62,14 @@ function writeConvexDevEnvFile() {
   if (!lines.length) return null;
   const path = resolve(tmpdir(), `boop-convex-${process.pid}.env.local`);
   writeFileSync(path, lines.join("\n") + "\n");
+  return path;
+}
+
+function writeNgrokTrafficPolicyFile() {
+  const path = resolve(tmpdir(), `boop-ngrok-${process.pid}.json`);
+  writeFileSync(path, `${JSON.stringify(createNgrokTrafficPolicy(), null, 2)}\n`, {
+    mode: 0o600,
+  });
   return path;
 }
 
@@ -227,6 +238,7 @@ ${C.banner}${line}
   🌐 Public URL:                   ${url}
   📮 Sendblue webhook (inbound):   ${webhook}
 ${fromLine}
+  🔒 Public ingress:               signed provider webhooks only
 ${line}${C.reset}${footer}`);
 }
 
@@ -284,9 +296,16 @@ const children = [serverChild, convexChild, debugChild];
 
 let ngrokUrlReady = Promise.resolve(null);
 if (useNgrok && ngrokInstalled) {
+  ngrokTrafficPolicyFile = writeNgrokTrafficPolicyFile();
+  const protectedArgs = [
+    `--traffic-policy-file=${ngrokTrafficPolicyFile}`,
+    "--log=stdout",
+    "--log-format=term",
+    "--log-level=info",
+  ];
   const args = ngrokDomain
-    ? ["http", port, `--domain=${ngrokDomain}`, "--log=stdout", "--log-format=term", "--log-level=info"]
-    : ["http", port, "--log=stdout", "--log-format=term", "--log-level=info"];
+    ? ["http", port, `--domain=${ngrokDomain}`, ...protectedArgs]
+    : ["http", port, ...protectedArgs];
   const ngrokChild = run("ngrok", "ngrok", args);
   children.push(ngrokChild);
   ngrokUrlReady = Promise.race([
@@ -301,7 +320,12 @@ async function autoRegisterWebhook(publicUrl) {
   if (envVars.SENDBLUE_AUTO_WEBHOOK === "false") return "disabled";
   const webhookUrl = `${publicUrl}/sendblue/webhook`;
   const prefix = `${C.ngrok}webhook${C.reset} │ `;
-  const child = spawn(nodeCmd, ["scripts/sendblue-webhook.mjs", webhookUrl], {
+  const args = [
+    "scripts/sendblue-webhook.mjs",
+    ...(exclusiveSendblueWebhook ? ["--exclusive"] : []),
+    webhookUrl,
+  ];
+  const child = spawn(nodeCmd, args, {
     cwd: root,
     env: { ...process.env },
   });
@@ -420,6 +444,13 @@ const shutdown = (code = 0) => {
   if (convexEnvFile) {
     try {
       unlinkSync(convexEnvFile);
+    } catch {
+      /* ignore */
+    }
+  }
+  if (ngrokTrafficPolicyFile) {
+    try {
+      unlinkSync(ngrokTrafficPolicyFile);
     } catch {
       /* ignore */
     }
