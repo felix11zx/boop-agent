@@ -1,5 +1,12 @@
 import { describe, expect, it, vi } from "vitest";
-import { collectToolkitCatalog } from "../server/composio.js";
+import { collectToolkitCatalog, CURATED_TOOLKITS } from "../server/composio.js";
+
+describe("curated Composio toolkits", () => {
+  it("contains no sparse or undefined entries", () => {
+    expect(Object.keys(CURATED_TOOLKITS)).toHaveLength(CURATED_TOOLKITS.length);
+    expect(CURATED_TOOLKITS.every(Boolean)).toBe(true);
+  });
+});
 
 describe("Composio toolkit catalog pagination", () => {
   it("collects every page and maps API metadata", async () => {
