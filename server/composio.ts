@@ -24,19 +24,12 @@ export interface CuratedToolkit {
 // this list by editing this array.
 export const CURATED_TOOLKITS: CuratedToolkit[] = [
   { slug: "gmail", displayName: "Gmail", authMode: "managed" },
-  { slug: "googledrive", displayName: "Google Drive", authMode: "managed" },
-  { slug: "googlesheets", displayName: "Google Sheets", authMode: "managed" },
-  { slug: "googledocs", displayName: "Google Docs", authMode: "managed" },
-  { slug: "slack", displayName: "Slack", authMode: "managed" },
   { slug: "github", displayName: "GitHub", authMode: "managed" },
-  { slug: "linear", displayName: "Linear", authMode: "managed" },
-  { slug: "notion", displayName: "Notion", authMode: "managed" },
-  { slug: "dropbox", displayName: "Dropbox", authMode: "managed" },
+  { slug: "googlesheets", displayName: "Google Sheets", authMode: "managed" },
   { slug: "supabase", displayName: "Supabase", authMode: "managed" },
-  { slug: "twitter", displayName: "Twitter / X", authMode: "byo" },
-  { slug: "linkedin", displayName: "LinkedIn", authMode: "managed" },
   { slug: "instagram", displayName: "Instagram", authMode: "managed" },
   { slug: "youtube", displayName: "YouTube", authMode: "managed" },
+  { slug: "openweather_api", displayName: "Weather", authMode: "byo" },
 ];
 
 const DISPLAY_NAME_BY_SLUG = new Map(CURATED_TOOLKITS.map((t) => [t.slug, t.displayName]));
@@ -471,9 +464,10 @@ function extractAccountIdentity(state: unknown, data: unknown): AccountIdentity 
 }
 
 export async function renameConnection(connectionId: string, alias: string): Promise<void> {
-  const composio = getComposio();
-  if (!composio) throw new Error("COMPOSIO_API_KEY not set");
-  await composio.connectedAccounts.update(connectionId, { alias });
+  const apiKey = process.env.COMPOSIO_API_KEY;
+  if (!apiKey) throw new Error("COMPOSIO_API_KEY not set");
+  const client = new ComposioApiClient({ apiKey });
+  await client.connectedAccounts.patch(connectionId, { alias });
 }
 
 export class ComposioNeedsAuthConfigError extends Error {
@@ -499,7 +493,7 @@ export async function authorizeToolkit(
 
   // 1. Find or create an auth config for the toolkit. session.authorize doesn't
   //    auto-discover or auto-create — we have to pass an authConfigId explicitly
-  //    to connectedAccounts.initiate. That's why a manually-added BYO config in
+  //    to connectedAccounts.link. That's why a manually-added BYO config in
   //    the dashboard would still trip "require auth configs but none exist" on
   //    the previous session.authorize-based code path.
   let authConfigId: string;
@@ -525,12 +519,13 @@ export async function authorizeToolkit(
     }
   }
 
-  // 2. Initiate the connection. allowMultiple if there's already an active connection
+  // 2. Link the connection. Composio-managed OAuth no longer supports the legacy
+  //    connectedAccounts.initiate endpoint. allowMultiple if there's already an active connection
   //    so we add another account instead of replacing.
   const existing = (await listConnectedToolkits()).filter(
     (c) => c.slug === slug && c.status === "ACTIVE",
   );
-  const conn = await composio.connectedAccounts.initiate(boopUserId(), authConfigId, {
+  const conn = await composio.connectedAccounts.link(boopUserId(), authConfigId, {
     ...(existing.length > 0 ? { allowMultiple: true } : {}),
     ...(opts?.callbackUrl ? { callbackUrl: opts.callbackUrl } : {}),
     ...(opts?.alias ? { alias: opts.alias } : {}),

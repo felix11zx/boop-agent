@@ -4,26 +4,24 @@ import {
   tool,
   type McpServerConfig,
   type McpSdkServerConfigWithInstance,
+  type SDKUserMessage,
 } from "@anthropic-ai/claude-agent-sdk";
 import type { RuntimeRunRequest, RuntimeRunResult, RuntimeTool } from "./types.js";
 import { aggregateUsageFromResult, EMPTY_USAGE } from "../usage.js";
 
 type ClaudePrompt =
   | string
-  | AsyncIterable<{
-      type: "user";
-      session_id: string;
-      message: { role: "user"; content: unknown };
-      parent_tool_use_id: null;
-    }>;
+  | AsyncIterable<SDKUserMessage>;
 
 function toClaudePrompt(prompt: RuntimeRunRequest["prompt"]): ClaudePrompt {
   if (typeof prompt === "string") return prompt;
   return (async function* () {
     yield {
       type: "user" as const,
-      session_id: "",
-      message: { role: "user" as const, content: prompt },
+      message: {
+        role: "user" as const,
+        content: prompt as SDKUserMessage["message"]["content"],
+      },
       parent_tool_use_id: null,
     };
   })();
