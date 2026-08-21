@@ -11,6 +11,7 @@ import { EMPTY_USAGE, type UsageTotals } from "./usage.js";
 import { getRuntimeConfig, type RuntimeConfig } from "./runtime-config.js";
 import { runAgentRuntime } from "./runtimes/index.js";
 import { buildPromptWithImages, fetchStoredBytes } from "./images/content-blocks.js";
+import { AgentTextLogBuffer } from "./agent-text-log-buffer.js";
 
 const running = new Map<string, AbortController>();
 
@@ -178,6 +179,13 @@ export async function spawnExecutionAgent(opts: SpawnExecutionAgentOpts): Promis
   let usage: UsageTotals = { ...EMPTY_USAGE };
   let status: "completed" | "failed" | "cancelled" = "completed";
   let errorMsg: string | undefined;
+  const textLogs = new AgentTextLogBuffer(async (content) => {
+    await convex.mutation(api.agents.addLog, {
+      agentId,
+      logType: "text",
+      content,
+    });
+  });
 
   try {
     const executionPrompt = await buildPromptWithImages({
@@ -193,13 +201,9 @@ export async function spawnExecutionAgent(opts: SpawnExecutionAgentOpts): Promis
       allowedTools,
       abortController: abort,
       mode: "execution",
-      onText: async (text) => {
+      onText: (text) => {
         buffer += text;
-        await convex.mutation(api.agents.addLog, {
-          agentId,
-          logType: "text",
-          content: text,
-        });
+        textLogs.append(text);
       },
       onToolUse: async (toolName, input) => {
         const toolShort = toolName.replace(/^mcp__[a-z-]+__/, "");
@@ -229,11 +233,27 @@ export async function spawnExecutionAgent(opts: SpawnExecutionAgentOpts): Promis
   } catch (err) {
     status = abort.signal.aborted ? "cancelled" : "failed";
     errorMsg = String(err);
-    await convex.mutation(api.agents.addLog, {
-      agentId,
-      logType: "error",
-      content: errorMsg,
-    });
+  }
+
+  try {
+    await textLogs.finish();
+  } catch (err) {
+    if (!errorMsg) {
+      status = "failed";
+      errorMsg = String(err);
+    } else {
+      console.error(`[agent ${shortId}] text log flush failed`, err);
+    }
+  }
+
+  try {
+    if (errorMsg) {
+      await convex.mutation(api.agents.addLog, {
+        agentId,
+        logType: "error",
+        content: errorMsg,
+      });
+    }
   } finally {
     running.delete(agentId);
   }
