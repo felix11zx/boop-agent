@@ -36,6 +36,19 @@ export interface RuntimeConfig {
   billingMode: "api" | "codex-subscription";
 }
 
+export const FAST_CODEX_MODEL = "gpt-5.6-luna";
+
+/** Keep heavyweight execution on the selected profile; use Luna/low only for
+ * lightweight routing and extraction work when Codex is the active runtime. */
+export function fastCodexRuntimeConfig(config: RuntimeConfig): RuntimeConfig {
+  if (config.runtime !== "codex") return config;
+  return {
+    ...config,
+    model: FAST_CODEX_MODEL,
+    reasoningEffort: "low",
+  };
+}
+
 let cachedConfig: { at: number; value: RuntimeConfig } | null = null;
 let cachedBrowserSettings: { at: number; value: BrowserSettings } | null = null;
 let cachedAppleSettings: { at: number; value: AppleSettings } | null = null;

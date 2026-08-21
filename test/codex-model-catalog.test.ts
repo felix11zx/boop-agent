@@ -6,7 +6,9 @@ import {
   reasoningEffortsForCodexModel,
 } from "../server/codex-model-catalog.js";
 import {
+  FAST_CODEX_MODEL,
   KNOWN_CODEX_MODELS,
+  fastCodexRuntimeConfig,
   resolveModelInput,
   resolveReasoningEffortInput,
 } from "../server/runtime-config.js";
@@ -102,6 +104,38 @@ describe("Codex model catalog", () => {
     expect(resolveModelInput("gpt-5.4", "codex")).toBeNull();
     expect(resolveModelInput("gpt-5.4-mini", "codex")).toBeNull();
     expect(resolveReasoningEffortInput("max")).toBe("max");
+  });
+
+  it("uses Luna/low for lightweight Codex work without mutating execution config", () => {
+    const executionConfig = {
+      runtime: "codex" as const,
+      model: "gpt-5.6-sol",
+      reasoningEffort: "medium" as const,
+      billingMode: "codex-subscription" as const,
+    };
+
+    const fastConfig = fastCodexRuntimeConfig(executionConfig);
+
+    expect(FAST_CODEX_MODEL).toBe("gpt-5.6-luna");
+    expect(fastConfig).toEqual({
+      ...executionConfig,
+      model: "gpt-5.6-luna",
+      reasoningEffort: "low",
+    });
+    expect(executionConfig).toMatchObject({
+      model: "gpt-5.6-sol",
+      reasoningEffort: "medium",
+    });
+  });
+
+  it("leaves Claude configs unchanged", () => {
+    const config = {
+      runtime: "claude" as const,
+      model: "claude-sonnet-4-6",
+      billingMode: "api" as const,
+    };
+
+    expect(fastCodexRuntimeConfig(config)).toBe(config);
   });
 
   it.each([

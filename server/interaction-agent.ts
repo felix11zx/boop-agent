@@ -9,6 +9,7 @@ import { createAutomationTools } from "./automation-tools.js";
 import { createDraftDecisionTools } from "./draft-tools.js";
 import { createSelfTools } from "./self-tools.js";
 import {
+  fastCodexRuntimeConfig,
   getRuntimeConfig,
   resolveRuntimeInput,
   setRuntimeProvider,
@@ -375,6 +376,7 @@ export async function handleUserMessage(opts: HandleOpts): Promise<string> {
   // Snapshot runtime for this top-level turn so same-turn set_runtime/set_model
   // changes do not split the dispatcher and any spawned execution agent.
   const runtimeConfig = await getRuntimeConfig();
+  const dispatcherRuntimeConfig = fastCodexRuntimeConfig(runtimeConfig);
   const directRuntimeSwitch =
     opts.kind === "proactive" ? null : resolveDirectRuntimeSwitch(opts.content);
   if (directRuntimeSwitch) {
@@ -526,7 +528,7 @@ export async function handleUserMessage(opts: HandleOpts): Promise<string> {
   let reply = "";
   let usage: UsageTotals = { ...EMPTY_USAGE };
   try {
-    const result = await runAgentRuntime(runtimeConfig, {
+    const result = await runAgentRuntime(dispatcherRuntimeConfig, {
       prompt: promptBuild.prompt,
       systemPrompt,
       tools,
@@ -612,8 +614,8 @@ export async function handleUserMessage(opts: HandleOpts): Promise<string> {
       source: "dispatcher",
       conversationId: opts.conversationId,
       turnId,
-      runtime: runtimeConfig.runtime,
-      billingMode: runtimeConfig.billingMode,
+      runtime: dispatcherRuntimeConfig.runtime,
+      billingMode: dispatcherRuntimeConfig.billingMode,
       model: usage.model,
       inputTokens: usage.inputTokens,
       outputTokens: usage.outputTokens,

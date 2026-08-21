@@ -1,7 +1,11 @@
 import { api } from "../../convex/_generated/api.js";
 import { convex } from "../convex-client.js";
 import { embed } from "../embeddings.js";
-import { getRuntimeConfig, type RuntimeConfig } from "../runtime-config.js";
+import {
+  fastCodexRuntimeConfig,
+  getRuntimeConfig,
+  type RuntimeConfig,
+} from "../runtime-config.js";
 import { runAgentRuntime } from "../runtimes/index.js";
 import { EMPTY_USAGE, type UsageTotals } from "../usage.js";
 import { SEGMENT_DEFAULTS, makeMemoryId, type MemorySegment } from "./types.js";
@@ -55,7 +59,9 @@ export async function extractAndStore(opts: {
 }): Promise<void> {
   const started = Date.now();
   try {
-    const runtimeConfig = opts.runtimeConfig ?? (await getRuntimeConfig());
+    const runtimeConfig = fastCodexRuntimeConfig(
+      opts.runtimeConfig ?? (await getRuntimeConfig()),
+    );
     const baseText = `USER: ${opts.userMessage}\n\nASSISTANT: ${opts.assistantReply}`;
     const payload =
       opts.imageStorageIds && opts.imageStorageIds.length > 0
