@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState, type ReactNode } from "react"
 import { useQuery } from "convex/react";
 import { api } from "../../../convex/_generated/api.js";
 import { IntegrationLogo } from "../lib/branding.js";
+import { CustomMcpSection } from "./CustomMcpSection.js";
 
 type AuthMode = "managed" | "byo";
 
@@ -978,7 +979,7 @@ export function ComposioSection({ isDark }: { isDark: boolean }) {
             </a>
             <button
               onClick={() => setNeedsAuthConfig(null)}
-              className={`rounded-xl px-2 py-1 text-xs ${isDark ? "text-zinc-400 hover:bg-white/5" : "text-zinc-500 hover:bg-amber-100"}`}
+              className={`rounded-xl px-2 py-1 text-xs ${isDark ? "text-amber-200/80 hover:bg-amber-400/10" : "text-amber-800/80 hover:bg-amber-100"}`}
             >
               Dismiss
             </button>
@@ -1069,6 +1070,7 @@ export function ComposioSection({ isDark }: { isDark: boolean }) {
           );
         })()
       )}
+      <CustomMcpSection isDark={isDark} />
       {toast && <Toast toast={toast} onDismiss={dismissToast} isDark={isDark} />}
     </section>
   );

@@ -20,6 +20,8 @@ import { createBrowserRouter } from "./browser-routes.js";
 import { createAppleRouter } from "./apple-routes.js";
 import { closeLocalBrowser } from "./browser/launcher.js";
 import { createChangelogRouter } from "./changelog.js";
+import { createCustomMcpRouter } from "./custom-mcp/routes.js";
+import { customMcpManager } from "./custom-mcp/manager.js";
 import {
   getRuntimeConfig,
   resolveModelInput,
@@ -47,6 +49,14 @@ async function runtimeConfigPayload() {
 
 async function main() {
   await loadIntegrations();
+  if (customMcpManager.status().configured) {
+    customMcpManager.connect().catch((err) =>
+      console.warn(
+        "[custom-mcp] startup connection failed",
+        err instanceof Error ? err.message : err,
+      ),
+    );
+  }
   startCleanupLoop();
   startAutomationLoop();
   startHeartbeatLoop();
@@ -152,6 +162,7 @@ async function main() {
   app.use("/memory", createMemoryRouter());
   app.use("/browser", createBrowserRouter());
   app.use("/apple", createAppleRouter());
+  app.use("/custom-mcp", createCustomMcpRouter());
   app.use("/changelog", createChangelogRouter());
 
   app.post("/agents/:id/cancel", (req, res) => {
@@ -227,8 +238,7 @@ async function main() {
     process.on(sig, () => {
       if (shuttingDown) return;
       shuttingDown = true;
-      closeLocalBrowser()
-        .catch(() => undefined)
+      Promise.allSettled([closeLocalBrowser(), customMcpManager.disconnect()])
         .finally(() => process.exit(signalExitCodes[sig]));
     });
   }

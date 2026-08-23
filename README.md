@@ -129,7 +129,7 @@ You need accounts for these. Keep the tabs open — setup will ask for credentia
 | [Composio](https://composio.dev/?utm_source=chris&utm_medium=youtube&utm_campaign=collab) | Integrations — one API key unlocks ~1000 toolkits. Optional if you just want chat + memory + automations without third-party access. | Free tier covers personal use | `CHRISXCOMPOSIO` — 1 month free on starter plan |
 | [ngrok](https://ngrok.com?ref=chrisraroque) or similar | Expose your local port so Sendblue can reach it. | Free tier works | Working on getting one (if you work here, please reach out!) |
 
-**Custom integrations welcome.** Composio covers the common catalog, but you're free to add your own MCP servers under `server/integrations/` and register them in `server/integrations/registry.ts` — the dispatcher treats them the same as Composio-backed ones (just named toolkits the execution agent can spawn against). Useful for in-house APIs, local tools, or anything Composio doesn't ship.
+**Custom integrations welcome.** Composio covers the common catalog, and Boop also has a built-in Custom MCP connection for one stdio or Streamable HTTP server. Configure it in `.env.local`; no integration code is required.
 
 **Local browser use is fully optional.** Boop can expose a local Chrome/Chromium profile to spawned agents, but it is off by default. Enable it from the debug dashboard under **Settings → Local browser use** when you want browser automation for login-only services, visual workflows, or bot-wall-sensitive pages. The Patchright browser binary is installed only if you opt in during setup or click the install button in Settings.
 
@@ -437,6 +437,9 @@ Everything lives in `.env.local` (auto-created by `npm run setup`). See `.env.ex
 | `BOOP_BROWSER_EXTRA_ARGS` | no | Optional newline-separated Chrome flags. Only `--flag` lines are used. |
 | `BOOP_APPLE_ENABLED` | no | Fallback master switch for optional local Apple data. Default `false`. Once changed in the dashboard, the Convex `settings` row takes precedence over this env var. |
 | `BOOP_APPLE_MESSAGES_ENABLED` / `BOOP_APPLE_NOTES_ENABLED` / `BOOP_APPLE_REMINDERS_ENABLED` | no | Per-source fallbacks for local iMessage, Apple Notes, and Apple Reminders. Each defaults to `false`, so enabling one source does not implicitly enable the others. |
+| `BOOP_CUSTOM_MCP_ENABLED` / `BOOP_CUSTOM_MCP_NAME` / `BOOP_CUSTOM_MCP_TRANSPORT` | no | Enables the built-in Custom MCP integration. Transport is `stdio` (recommended for a server on this Mac) or `http` (Streamable HTTP). |
+| `BOOP_CUSTOM_MCP_COMMAND` / `BOOP_CUSTOM_MCP_ARGS_JSON` / `BOOP_CUSTOM_MCP_ENV_JSON` | for stdio | Executable path plus optional JSON string array and string-valued environment object. |
+| `BOOP_CUSTOM_MCP_URL` / `BOOP_CUSTOM_MCP_HEADERS_JSON` | for HTTP | Streamable HTTP endpoint plus an optional string-valued headers object. An API key is only needed if your MCP server requires one. |
 | `BOOP_UPSTREAM_CHECK` | no | Set to `false` to disable the new-version banner on `npm run dev`. Default: on. |
 | `PORT` | no | Default `3456`. |
 | `PUBLIC_URL` | no | Leave at `http://localhost:3456` for free ngrok. A non-local value tells `npm run dev` to skip ngrok and use that static base URL for provider webhooks. |
@@ -497,6 +500,33 @@ You can also view the overall Apple status from **Settings → Apple data**. Das
 The control routes for local Apple data are localhost-only; public tunnel traffic cannot enable or disable local Apple access. Tool output is redacted before it reaches the agent/user: phone numbers and contact handles are hidden in Apple outputs, replies, and outgoing iMessage/log paths.
 
 On non-macOS machines, Local Mac connection cards are hidden or report unavailable. Composio integrations and the rest of Boop continue to work normally.
+
+## Custom MCP server
+
+Boop can connect one existing MCP server and make every tool from it available to both the Claude and Codex runtimes. The connection appears at the very bottom of the **Connections** page. It is intentionally unrestricted: Boop does not filter individual tools or add per-tool confirmation prompts, so only connect a server you trust.
+
+For an MCP server running on the same Mac, use stdio. It keeps the server private, starts it as a child process, and does not require Tailscale Funnel or another public tunnel:
+
+```dotenv
+BOOP_CUSTOM_MCP_ENABLED=true
+BOOP_CUSTOM_MCP_NAME="Mac MCP"
+BOOP_CUSTOM_MCP_TRANSPORT=stdio
+BOOP_CUSTOM_MCP_COMMAND="/absolute/path/to/your-mcp-server"
+BOOP_CUSTOM_MCP_ARGS_JSON='["--stdio"]'
+BOOP_CUSTOM_MCP_ENV_JSON='{}'
+```
+
+If your server already exposes MCP over Streamable HTTP, use its local URL instead:
+
+```dotenv
+BOOP_CUSTOM_MCP_ENABLED=true
+BOOP_CUSTOM_MCP_NAME="Mac MCP"
+BOOP_CUSTOM_MCP_TRANSPORT=http
+BOOP_CUSTOM_MCP_URL="http://127.0.0.1:8765/mcp"
+BOOP_CUSTOM_MCP_HEADERS_JSON='{}'
+```
+
+No API key is inherently required. Put an authorization header in `BOOP_CUSTOM_MCP_HEADERS_JSON` only when your own HTTP server expects one. Restart Boop after changing `.env.local`; it connects automatically on startup. The **Connect**, **Disconnect**, and **Refresh** controls are localhost-only and never return command arguments, environment variables, headers, or tokens to the browser.
 
 ---
 
@@ -603,6 +633,7 @@ boop-agent/
 │   ├── composio-routes.ts         # /composio/* HTTP routes for the Debug UI
 │   ├── browser-routes.ts          # /browser/* HTTP routes for Local browser use
 │   ├── apple-routes.ts            # /apple/* local-only routes for Local Mac data
+│   ├── custom-mcp/                # Config, shared MCP client, adapters, local control routes
 │   ├── broadcast.ts               # WS fanout
 │   ├── convex-client.ts           # Convex HTTP client
 │   ├── apple/
@@ -625,6 +656,7 @@ boop-agent/
 │   └── integrations/
 │       ├── registry.ts            # Integration loader
 │       ├── browser-loader.ts      # Registers optional Local browser use
+│       ├── custom-mcp-loader.ts   # Registers the configured Custom MCP server
 │       └── composio-loader.ts     # Registers each connected Composio toolkit
 ├── convex/
 │   ├── schema.ts
