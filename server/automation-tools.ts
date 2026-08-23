@@ -33,6 +33,11 @@ Examples:
 
 If you don't yet know the user's timezone (get_config returns userTimezone=null), ASK before creating any time-of-day automation — otherwise it'll fire in the server's zone, which is almost always wrong.
 
+The task argument is the work to perform AFTER the schedule fires. Write it as
+a one-run, result-producing instruction (for example: "Read today's calendar
+and summarize it"). Never tell the worker to create, schedule, or set up an
+automation — create_automation is already doing that here.
+
 Use this for anything the user says "every [time]" or "remind me" about.
 Integrations available: ${integrationHint}`,
       {
@@ -40,7 +45,9 @@ Integrations available: ${integrationHint}`,
         schedule: z.string().describe("Cron expression (5 fields)."),
         task: z
           .string()
-          .describe("Specific task for the sub-agent — what to look up, draft, or summarize."),
+          .describe(
+            "The work to execute once each time the schedule fires. Describe the result-producing task; never ask it to create or schedule an automation.",
+          ),
         integrations: z
           .array(z.string())
           .optional()

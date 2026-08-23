@@ -123,6 +123,45 @@ export const markRan = mutation({
   },
 });
 
+// Claim a due automation and create its run in the same transaction. The
+// server polls more frequently than an automation may take to finish, so
+// advancing nextRunAt only after the worker returns would start duplicates on
+// every poll (and on every server instance).
+export const claimDueRun = mutation({
+  args: {
+    automationId: v.string(),
+    runId: v.string(),
+    claimedAt: v.number(),
+    nextRunAt: v.number(),
+  },
+  handler: async (ctx, args) => {
+    const auto = await ctx.db
+      .query("automations")
+      .withIndex("by_automation_id", (q) => q.eq("automationId", args.automationId))
+      .unique();
+    if (
+      !auto ||
+      !auto.enabled ||
+      auto.nextRunAt === undefined ||
+      auto.nextRunAt > args.claimedAt
+    ) {
+      return null;
+    }
+
+    await ctx.db.patch(auto._id, {
+      lastRunAt: args.claimedAt,
+      nextRunAt: args.nextRunAt,
+    });
+    await ctx.db.insert("automationRuns", {
+      runId: args.runId,
+      automationId: args.automationId,
+      status: "running",
+      startedAt: args.claimedAt,
+    });
+    return auto._id;
+  },
+});
+
 export const createRun = mutation({
   args: {
     runId: v.string(),
