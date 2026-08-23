@@ -2,6 +2,7 @@ import type { MutationCtx, QueryCtx } from "./_generated/server";
 
 export const DEMO_PREFIX = "demo:";
 export const DEMO_SETTING_KEY = "debug_demo_mode";
+export const DEMO_COUNTS_SETTING_KEY = "debug_demo_counts";
 export const DEMO_SCAN_LIMIT = 5000;
 
 export function isDemoId(value?: string | null): boolean {

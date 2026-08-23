@@ -1,6 +1,12 @@
 import { mutation, query, type MutationCtx, type QueryCtx } from "./_generated/server";
 import { v } from "convex/values";
-import { DEMO_PREFIX, DEMO_SCAN_LIMIT, DEMO_SETTING_KEY, isDemoId } from "./demoMode";
+import {
+  DEMO_COUNTS_SETTING_KEY,
+  DEMO_PREFIX,
+  DEMO_SCAN_LIMIT,
+  DEMO_SETTING_KEY,
+  isDemoId,
+} from "./demoMode";
 
 const MINUTE = 60 * 1000;
 const HOUR = 60 * MINUTE;
@@ -42,6 +48,19 @@ interface DemoCounts {
   consolidationRuns: number;
   usageRecords: number;
 }
+
+const EMPTY_DEMO_COUNTS: DemoCounts = {
+  conversations: 0,
+  messages: 0,
+  agents: 0,
+  agentLogs: 0,
+  memories: 0,
+  memoryEvents: 0,
+  automations: 0,
+  automationRuns: 0,
+  consolidationRuns: 0,
+  usageRecords: 0,
+};
 
 interface AgentTemplate {
   name: string;
@@ -121,49 +140,45 @@ async function setDemoSetting(ctx: MutationCtx, enabled: boolean) {
   });
 }
 
-async function demoCounts(ctx: QueryCtx | MutationCtx): Promise<DemoCounts> {
-  const [
-    conversations,
-    messages,
-    agents,
-    agentLogs,
-    memories,
-    memoryEvents,
-    automations,
-    automationRuns,
-    consolidationRuns,
-    usageRecords,
-  ] = await Promise.all([
-    ctx.db.query("conversations").order("desc").take(DEMO_SCAN_LIMIT),
-    ctx.db.query("messages").order("desc").take(DEMO_SCAN_LIMIT),
-    ctx.db.query("executionAgents").order("desc").take(DEMO_SCAN_LIMIT),
-    ctx.db.query("agentLogs").order("desc").take(DEMO_SCAN_LIMIT),
-    ctx.db.query("memoryRecords").order("desc").take(DEMO_SCAN_LIMIT),
-    ctx.db.query("memoryEvents").order("desc").take(DEMO_SCAN_LIMIT),
-    ctx.db.query("automations").order("desc").take(DEMO_SCAN_LIMIT),
-    ctx.db.query("automationRuns").order("desc").take(DEMO_SCAN_LIMIT),
-    ctx.db.query("consolidationRuns").order("desc").take(DEMO_SCAN_LIMIT),
-    ctx.db.query("usageRecords").order("desc").take(DEMO_SCAN_LIMIT),
-  ]);
+async function readDemoCounts(ctx: QueryCtx): Promise<DemoCounts> {
+  const row = await ctx.db
+    .query("settings")
+    .withIndex("by_key", (q) => q.eq("key", DEMO_COUNTS_SETTING_KEY))
+    .unique();
+  if (!row) return EMPTY_DEMO_COUNTS;
 
-  return {
-    conversations: conversations.filter((r) => isDemoId(r.conversationId)).length,
-    messages: messages.filter((r) => isDemoId(r.conversationId) || isDemoId(r.agentId)).length,
-    agents: agents.filter((r) => isDemoId(r.agentId)).length,
-    agentLogs: agentLogs.filter((r) => isDemoId(r.agentId)).length,
-    memories: memories.filter((r) => isDemoId(r.memoryId)).length,
-    memoryEvents: memoryEvents.filter(
-      (r) => isDemoId(r.conversationId) || isDemoId(r.memoryId) || isDemoId(r.agentId),
-    ).length,
-    automations: automations.filter((r) => isDemoId(r.automationId)).length,
-    automationRuns: automationRuns.filter(
-      (r) => isDemoId(r.runId) || isDemoId(r.automationId) || isDemoId(r.agentId),
-    ).length,
-    consolidationRuns: consolidationRuns.filter((r) => isDemoId(r.runId)).length,
-    usageRecords: usageRecords.filter(
-      (r) => isDemoId(r.conversationId) || isDemoId(r.agentId) || isDemoId(r.runId),
-    ).length,
-  };
+  try {
+    const value: unknown = JSON.parse(row.value);
+    if (!value || typeof value !== "object") return EMPTY_DEMO_COUNTS;
+    const record = value as Record<keyof DemoCounts, unknown>;
+    if (
+      !Object.keys(EMPTY_DEMO_COUNTS).every(
+        (key) => typeof record[key as keyof DemoCounts] === "number",
+      )
+    ) {
+      return EMPTY_DEMO_COUNTS;
+    }
+    return record as DemoCounts;
+  } catch {
+    return EMPTY_DEMO_COUNTS;
+  }
+}
+
+async function setDemoCounts(ctx: MutationCtx, counts: DemoCounts) {
+  const existing = await ctx.db
+    .query("settings")
+    .withIndex("by_key", (q) => q.eq("key", DEMO_COUNTS_SETTING_KEY))
+    .unique();
+  const value = JSON.stringify(counts);
+  if (existing) {
+    await ctx.db.patch(existing._id, { value, updatedAt: Date.now() });
+    return;
+  }
+  await ctx.db.insert("settings", {
+    key: DEMO_COUNTS_SETTING_KEY,
+    value,
+    updatedAt: Date.now(),
+  });
 }
 
 async function deleteDemoRows(ctx: MutationCtx): Promise<DemoCounts> {
@@ -1570,7 +1585,7 @@ async function seedDemoData(ctx: MutationCtx) {
 export const status = query({
   args: {},
   handler: async (ctx) => {
-    const [setting, counts] = await Promise.all([readDemoSetting(ctx), demoCounts(ctx)]);
+    const [setting, counts] = await Promise.all([readDemoSetting(ctx), readDemoCounts(ctx)]);
     const total = Object.values(counts).reduce((sum, count) => sum + count, 0);
     return {
       enabled: setting === "true",
@@ -1588,18 +1603,8 @@ export const setMode = mutation({
     const removed = await deleteDemoRows(ctx);
     const seeded = args.enabled ? await seedDemoData(ctx) : null;
     await setDemoSetting(ctx, args.enabled);
-    const counts: DemoCounts = seeded ?? {
-      conversations: 0,
-      messages: 0,
-      agents: 0,
-      agentLogs: 0,
-      memories: 0,
-      memoryEvents: 0,
-      automations: 0,
-      automationRuns: 0,
-      consolidationRuns: 0,
-      usageRecords: 0,
-    };
+    const counts: DemoCounts = seeded ?? EMPTY_DEMO_COUNTS;
+    await setDemoCounts(ctx, counts);
     return {
       enabled: args.enabled,
       removed,
