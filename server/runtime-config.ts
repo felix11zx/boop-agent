@@ -21,13 +21,8 @@ const BROWSER_START_URL_KEY = "browser_start_url";
 const BROWSER_CHANNEL_KEY = "browser_channel";
 const BROWSER_EXECUTABLE_PATH_KEY = "browser_executable_path";
 const BROWSER_EXTRA_ARGS_KEY = "browser_extra_args";
-export const APPLE_ENABLED_KEY = "apple_enabled";
-export const APPLE_MESSAGES_ENABLED_KEY = "apple_messages_enabled";
-export const APPLE_NOTES_ENABLED_KEY = "apple_notes_enabled";
-export const APPLE_REMINDERS_ENABLED_KEY = "apple_reminders_enabled";
 const CONFIG_TTL_MS = 30 * 1000;
 const BROWSER_CONFIG_TTL_MS = 5 * 1000;
-const APPLE_CONFIG_TTL_MS = 5 * 1000;
 
 export interface RuntimeConfig {
   runtime: RuntimeName;
@@ -51,7 +46,6 @@ export function fastCodexRuntimeConfig(config: RuntimeConfig): RuntimeConfig {
 
 let cachedConfig: { at: number; value: RuntimeConfig } | null = null;
 let cachedBrowserSettings: { at: number; value: BrowserSettings } | null = null;
-let cachedAppleSettings: { at: number; value: AppleSettings } | null = null;
 
 export interface BrowserSettings {
   enabled: boolean;
@@ -62,13 +56,6 @@ export interface BrowserSettings {
   channel: string;
   executablePath: string;
   extraArgs: string[];
-}
-
-export interface AppleSettings {
-  enabled: boolean;
-  messagesEnabled: boolean;
-  notesEnabled: boolean;
-  remindersEnabled: boolean;
 }
 
 const DEFAULT_BROWSER_PROFILE_DIR = join(homedir(), ".boop", "browser-profile");
@@ -354,45 +341,4 @@ export async function getBrowserSettings(): Promise<BrowserSettings> {
 
 export function clearBrowserSettingsCache(): void {
   cachedBrowserSettings = null;
-}
-
-export async function getAppleSettings(): Promise<AppleSettings> {
-  if (cachedAppleSettings && Date.now() - cachedAppleSettings.at < APPLE_CONFIG_TTL_MS) {
-    return cachedAppleSettings.value;
-  }
-
-  const [enabled, messagesEnabled, notesEnabled, remindersEnabled] = await Promise.all([
-    getSetting(APPLE_ENABLED_KEY),
-    getSetting(APPLE_MESSAGES_ENABLED_KEY),
-    getSetting(APPLE_NOTES_ENABLED_KEY),
-    getSetting(APPLE_REMINDERS_ENABLED_KEY),
-  ]);
-  const appleEnabled = settingBool(enabled, process.env.BOOP_APPLE_ENABLED, false);
-  const value: AppleSettings = {
-    enabled: appleEnabled,
-    messagesEnabled:
-      appleEnabled &&
-      settingBool(
-        messagesEnabled,
-        process.env.BOOP_APPLE_MESSAGES_ENABLED,
-        false,
-      ),
-    notesEnabled:
-      appleEnabled &&
-      settingBool(notesEnabled, process.env.BOOP_APPLE_NOTES_ENABLED, false),
-    remindersEnabled:
-      appleEnabled &&
-      settingBool(
-        remindersEnabled,
-        process.env.BOOP_APPLE_REMINDERS_ENABLED,
-        false,
-      ),
-  };
-
-  cachedAppleSettings = { at: Date.now(), value };
-  return value;
-}
-
-export function clearAppleSettingsCache(): void {
-  cachedAppleSettings = null;
 }

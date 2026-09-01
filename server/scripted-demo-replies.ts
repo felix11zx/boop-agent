@@ -5,12 +5,7 @@ import { currentPage, launchLocalBrowser } from "./browser/launcher.js";
 import { redactPhoneNumbers } from "./privacy.js";
 
 const DEMO_MODE_SETTING_KEY = "debug_demo_mode";
-const WATER_BOTTLE_PROMPT = "what was that water bottle brand my mom texted me about";
 const LINKEDIN_LOGIN_URL = "https://www.linkedin.com/login/en-us/";
-
-export function matchesWaterBottleDemoPrompt(content: string): boolean {
-  return normalizeDemoPrompt(content) === WATER_BOTTLE_PROMPT;
-}
 
 export function matchesLinkedInDemoPrompt(content: string): boolean {
   const prompt = normalizeDemoPrompt(content);
@@ -88,11 +83,7 @@ export async function maybeHandleScriptedDemoReply(
   opts: ScriptedDemoReplyOpts,
   deps: ScriptedDemoReplyDeps,
 ): Promise<boolean> {
-  const demo = matchesWaterBottleDemoPrompt(opts.content)
-    ? "water-bottle"
-    : matchesLinkedInDemoPrompt(opts.content)
-      ? "linkedin-login"
-      : null;
+  const demo = matchesLinkedInDemoPrompt(opts.content) ? "linkedin-login" : null;
   if (!demo) return false;
   if (!(await demoModeEnabled())) return false;
 
@@ -126,18 +117,6 @@ export async function maybeHandleScriptedDemoReply(
     });
     log(`→ ${JSON.stringify(text)}`);
   };
-
-  if (demo === "water-bottle") {
-    log("matched water bottle demo prompt");
-    await deps.sendTypingIndicator(opts.fromNumber);
-    await wait(150);
-    await sendStep("Searching iMessage for the thread from your mom...");
-
-    await deps.sendTypingIndicator(opts.fromNumber);
-    await wait(1800);
-    await sendStep("It was the LARQ bottle.");
-    return true;
-  }
 
   log("matched LinkedIn browser demo prompt");
   await deps.sendTypingIndicator(opts.fromNumber);

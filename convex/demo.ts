@@ -529,7 +529,7 @@ const agentTemplates: AgentTemplate[] = [
     task: "Check pending message drafts and flag anything waiting for approval.",
     result:
       "Found 3 pending drafts. One customer reply should be sent before noon.",
-    integrations: ["gmail", "imessage"],
+    integrations: ["gmail"],
     tool: "mcp__gmail__list_drafts",
     query: "pending customer replies",
     conversationId: "demo:conversation:morning-brief",
@@ -669,13 +669,13 @@ const agentTemplates: AgentTemplate[] = [
     conversationId: "demo:conversation:launch-week",
   },
   {
-    name: "Sub-agent · Notes and receipt sweep",
-    task: "Search local notes and Drive for open personal-admin items that should not be lost during launch week.",
+    name: "Sub-agent · Receipt sweep",
+    task: "Search Drive for open personal-admin items that should not be lost during launch week.",
     result:
       "Found the package pickup cutoff, the reimbursement packet, and the hotel cancellation deadline. Added them to the afternoon brief.",
     status: "completed",
-    integrations: ["apple-notes", "googledrive", "apple-reminders"],
-    tool: "mcp__apple-notes__search_notes",
+    integrations: ["googledrive"],
+    tool: "mcp__googledrive__search",
     query: "package pickup reimbursement hotel cancellation",
     conversationId: "demo:conversation:personal-admin",
   },
@@ -685,8 +685,8 @@ const agentTemplates: AgentTemplate[] = [
     result:
       "Prepared the product review brief: send the renewal reply, move the recruiting sync, review two launch blockers, and handle the package pickup before the evening cutoff.",
     status: "completed",
-    integrations: ["imessage", "gmail", "googlecalendar", "linear", "slack", "boop_memory"],
-    tool: "mcp__imessage__read_messages",
+    integrations: ["gmail", "googlecalendar", "linear", "slack", "boop_memory"],
+    tool: "mcp__gmail__search_email",
     query: "latest product review attention request",
     conversationId: "demo:conversation:morning-brief",
   },
@@ -1023,9 +1023,6 @@ function demoToolForIntegration(integration: string): string {
     googledrive: "mcp__googledrive__search",
     googledocs: "mcp__googledocs__fetch",
     googlesheets: "mcp__googlesheets__read",
-    imessage: "mcp__imessage__read_messages",
-    "apple-notes": "mcp__apple-notes__search_notes",
-    "apple-reminders": "mcp__apple-reminders__list_reminders",
     boop_memory: "mcp__boop-memory__recall",
     boop_usage: "mcp__boop-usage__summary",
   };
@@ -1044,9 +1041,6 @@ function demoAccountForIntegration(integration: string): string {
     googledrive: "shared_drive_demo",
     googledocs: "shared_drive_demo",
     googlesheets: "shared_drive_demo",
-    imessage: "local_messages_demo",
-    "apple-notes": "local_notes_demo",
-    "apple-reminders": "local_reminders_demo",
     boop_memory: "boop_memory_demo",
     boop_usage: "boop_usage_demo",
   };
@@ -1067,9 +1061,6 @@ function demoToolResultText(template: AgentTemplate, integration: string, status
     googledrive: "Google Drive",
     googledocs: "Google Docs",
     googlesheets: "Google Sheets",
-    imessage: "iMessage",
-    "apple-notes": "Apple Notes",
-    "apple-reminders": "Apple Reminders",
     boop_memory: "Boop memory",
     boop_usage: "Boop usage",
   };

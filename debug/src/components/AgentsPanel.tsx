@@ -45,13 +45,7 @@ type SourceLink = {
   displayUrl: string;
 };
 
-type AppleIntegrationRaw = "imessage" | "apple-notes" | "apple-reminders";
-
 type AgentIntegrationContext = {
-  name?: string | null;
-  task?: string | null;
-  result?: string | null;
-  error?: string | null;
   mcpServers: string[];
 };
 
@@ -76,64 +70,10 @@ function isEstimatedCost(agent: { runtime?: string; billingMode?: string }): boo
   return agent.runtime === "codex" || agent.billingMode === "codex-subscription";
 }
 
-function isAppleServer(name: string): boolean {
-  return name.toLowerCase().trim() === "apple";
-}
-
-function hasAnySignal(text: string, signals: RegExp[]): boolean {
-  return signals.some((signal) => signal.test(text));
-}
-
-function inferAppleIntegrations(
-  agent: AgentIntegrationContext,
-  logs?: LogEntry[] | null,
-): AppleIntegrationRaw[] {
-  const toolText = (logs ?? [])
-    .map((log) => log.toolName ?? "")
-    .join(" ")
-    .toLowerCase();
-  const agentText = [
-    agent.name,
-    agent.task,
-    agent.result,
-    agent.error,
-    ...(logs ?? []).map((log) => log.content),
-  ]
-    .filter(Boolean)
-    .join(" ")
-    .toLowerCase();
-
-  const inferred: AppleIntegrationRaw[] = [];
-  if (
-    hasAnySignal(toolText, [/apple_(?:read_messages|list_chats)\b/]) ||
-    hasAnySignal(agentText, [/\bimessage\b/, /\bsms\b/, /\bmessages?\b/, /\bchats?\b/])
-  ) {
-    inferred.push("imessage");
-  }
-  if (
-    hasAnySignal(toolText, [/apple_(?:search_notes|read_note)\b/]) ||
-    hasAnySignal(agentText, [/\bapple notes?\b/, /\bnotes?\b/])
-  ) {
-    inferred.push("apple-notes");
-  }
-  if (
-    hasAnySignal(toolText, [/apple_list_reminders\b/]) ||
-    hasAnySignal(agentText, [/\bapple reminders?\b/, /\breminders?\b/])
-  ) {
-    inferred.push("apple-reminders");
-  }
-  return inferred;
-}
-
 function integrationBadgesForAgent(
   agent: AgentIntegrationContext,
-  logs?: LogEntry[] | null,
 ): string[] {
-  const appleIntegrations = inferAppleIntegrations(agent, logs);
-  const badges = agent.mcpServers.flatMap((name) =>
-    isAppleServer(name) && appleIntegrations.length > 0 ? appleIntegrations : [name],
-  );
-  return [...new Set(badges)];
+  return [...new Set(agent.mcpServers)];
 }
 
 function integrationDisplayName(raw: string): string {
@@ -721,7 +661,7 @@ function AgentDetail({
   const totalTokens = agent.inputTokens + agent.outputTokens;
   const estimatedCost = isEstimatedCost(agent);
   const timeline = logs ? buildTimeline(logs as LogEntry[]) : [];
-  const integrationBadges = integrationBadgesForAgent(agent, logs as LogEntry[] | undefined);
+  const integrationBadges = integrationBadgesForAgent(agent);
 
   return (
     <div className="mx-auto max-w-[1040px] space-y-4 pb-10 fade-in">

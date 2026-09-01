@@ -45,8 +45,6 @@ export async function loadIntegrations(): Promise<void> {
   await registerComposioToolkits();
   const { registerBrowserIntegration } = await import("./browser-loader.js");
   registerBrowserIntegration();
-  const { registerAppleIntegration } = await import("./apple-loader.js");
-  registerAppleIntegration();
   const { registerCustomMcpIntegration } = await import("./custom-mcp-loader.js");
   registerCustomMcpIntegration();
   const loaded = [...registry.keys()];

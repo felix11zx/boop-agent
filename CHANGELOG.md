@@ -8,13 +8,6 @@ Format:
 
 ---
 
-## Unreleased — Optional local Apple data
-
-- Added: optional Mac-only, read-only local Apple data connectors for iMessage/SMS history, Apple Notes, and Apple Reminders. The integration is off by default and requires both the master Apple data toggle and a per-source connect action before tools are exposed.
-- Added: Debug UI Local Mac connection cards for iMessage, Apple Notes, and Apple Reminders, plus Settings-panel Apple status and permission helpers for Full Disk Access and macOS Automation.
-- Added: local-only `/apple/*` control routes and Convex-backed Apple settings with `.env.local` fallbacks (`BOOP_APPLE_ENABLED`, `BOOP_APPLE_MESSAGES_ENABLED`, `BOOP_APPLE_NOTES_ENABLED`, `BOOP_APPLE_REMINDERS_ENABLED`).
-- Added: phone-number and contact-handle redaction for Apple tool output, agent replies, outgoing iMessage paths, and server log previews.
-
 ## Unreleased — Social Composio connectors
 
 - Added: Instagram and YouTube to the default Composio connector catalog.

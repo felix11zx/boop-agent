@@ -75,30 +75,6 @@ const TOOL_BRANDS: ToolBrand[] = [
   { key: "stripe", displayName: "Stripe", domain: "stripe.com", aliases: ["stripe"] },
   { key: "supabase", displayName: "Supabase", domain: "supabase.com", aliases: ["supabase"] },
   { key: "granola", displayName: "Granola", domain: "granola.ai", aliases: ["granola", "granola_mcp"] },
-  {
-    key: "imessage",
-    displayName: "iMessage",
-    domain: "apple.com",
-    aliases: ["imessage", "messages", "message", "chats", "chat", "sms"],
-    logoUrl: "/integration-icons/imessage.png",
-    fullBleedLogo: true,
-  },
-  {
-    key: "apple-notes",
-    displayName: "Apple Notes",
-    domain: "apple.com",
-    aliases: ["apple-notes", "notes", "note"],
-    logoUrl: "/integration-icons/apple-notes.png",
-    fullBleedLogo: true,
-  },
-  {
-    key: "apple-reminders",
-    displayName: "Apple Reminders",
-    domain: "apple.com",
-    aliases: ["apple-reminders", "reminders", "reminder"],
-    logoUrl: "/integration-icons/apple-reminders.png",
-    fullBleedLogo: true,
-  },
 ];
 
 function normalize(value: string): string {

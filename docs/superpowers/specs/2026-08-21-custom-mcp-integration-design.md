@@ -21,12 +21,11 @@
 - Multiple independently configured custom MCP servers in the first version.
 - Tool filtering, read-only mode, confirmation prompts, or policy enforcement.
 - Publishing the MCP through Tailscale Funnel or any other public ingress.
-- Replacing the existing Apple integration as part of this change.
 - Persisting MCP secrets or transport configuration in Convex.
 
 ## 3. User experience
 
-The Connections page gains a final subsection after the existing Local Mac and account catalog content:
+The Connections page gains a final subsection after the account catalog content:
 
 ```text
 Custom MCP
@@ -88,7 +87,7 @@ Defaults and validation:
 - Stdio requires a non-empty command. Arguments default to an empty array and child environment additions default to an empty object.
 - HTTP requires an absolute `http:` or `https:` URL. Headers default to an empty object.
 - JSON configuration must have the expected top-level type. Invalid JSON produces a sanitized `Not configured`/configuration-error status without crashing Boop.
-- Stdio inherits Boop's process environment and overlays only the explicitly configured entries.
+- Stdio inherits the MCP SDK's safe default environment and overlays only the explicitly configured entries.
 - Configuration changes take effect after restarting Boop. Runtime UI actions do not modify `.env.local`.
 
 ## 5. Architecture
@@ -149,7 +148,7 @@ Both runtime adapters use the same catalog and call path. Claude can receive the
 
 ### 5.5 Name collisions
 
-External tools are not filtered or renamed within the external catalog. Boop namespaces the integration as `custom-mcp`/`custom_mcp` at the runtime boundary, preventing collisions with Apple, browser, Composio, and built-in tools. Duplicate names returned by the same external server are treated as a connection/catalog error because they cannot be addressed deterministically.
+External tools are not filtered or renamed within the external catalog. Boop namespaces the integration as `custom-mcp`/`custom_mcp` at the runtime boundary, preventing collisions with browser, Composio, and built-in tools. Duplicate names returned by the same external server are treated as a connection/catalog error because they cannot be addressed deterministically.
 
 ## 6. Local control API
 
@@ -162,7 +161,7 @@ POST /custom-mcp/disconnect
 POST /custom-mcp/refresh
 ```
 
-All routes use the same trusted-local-request boundary as the Apple and browser controls. Public tunnel traffic receives `403` and cannot start, stop, inspect, or invoke the MCP.
+All routes use the same trusted-local-request boundary as the browser controls. Public tunnel traffic receives `403` and cannot start, stop, inspect, or invoke the MCP.
 
 Status response shape:
 

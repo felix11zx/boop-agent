@@ -8,7 +8,6 @@ import {
   RuntimeProviderLogo,
   type RuntimeProvider,
 } from "../lib/branding.js";
-import { AppleSection } from "./AppleSection.js";
 import { BrowserSection } from "./BrowserSection.js";
 
 type RuntimeChoice = "claude" | "codex";
@@ -73,7 +72,7 @@ const SETTINGS: Setting[] = [
   },
 ];
 
-const RUNTIME_SETTING_COUNT = SETTINGS.length + 5;
+const RUNTIME_SETTING_COUNT = SETTINGS.length + 4;
 const DEMO_PHONE_NUMBER = "+11111111111";
 
 const RUNTIME_OPTIONS: Option<RuntimeChoice>[] = [
@@ -230,7 +229,6 @@ export function SettingsPanel({
           ),
         )}
         <BrowserSection isDark={isDark} />
-        <AppleSection isDark={isDark} />
         <DemoModeRow isDark={isDark} />
       </div>
     </div>
