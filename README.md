@@ -40,6 +40,30 @@ Built on:
 
 ---
 
+## About this fork
+
+This branch is a reliability-focused fork of [Chris Raroque's original Boop repository](https://github.com/raroque/boop-agent). It preserves the original project's product idea, personality, architecture, setup flow, and attribution while extending the implementation for more resilient day-to-day local operation.
+
+The original repository remains the canonical starting point and the clone target used throughout this README. The changes below describe what this branch adds or deliberately removes on top of that foundation.
+
+### What changed from upstream
+
+| Area | Changes in this branch |
+|---|---|
+| Sendblue delivery | Adds a durable, encrypted inbound-message queue with atomically fenced worker leases, bounded retries, dead-letter handling, and polling recovery for callbacks missed during tunnel reconnects. Ambiguous outbound failures are not retried automatically when doing so could duplicate an iMessage. |
+| Public ingress | Restricts the generated ngrok tunnel to signed provider webhook routes and tightens webhook synchronization. Free ngrok development domains are supported without requiring a paid static domain. |
+| Codex runtime | Discovers the signed-in account's available models and reasoning levels, improves callback draining, uses faster profiles for lightweight work, and batches streamed execution logs to reduce overhead. |
+| Integrations | Adds one built-in Custom MCP connection over stdio or Streamable HTTP, available to both Claude and Codex without writing a new integration adapter. The default Composio catalog is intentionally narrower while additional Composio toolkits remain available on demand. |
+| Convex and automations | Retries transient Convex HTTP failures and claims scheduled automation runs atomically so concurrent workers cannot execute the same due run twice. |
+| Setup and maintenance | Strengthens runtime defaults, webhook preflight checks, local setup behavior, dependency versions, and the bundled Convex agent skills. This branch requires Node.js 22 or newer. |
+| Removed local Apple integrations | Removes the optional local Apple data connectors for reading iMessage history, Apple Notes, and Apple Reminders. Sendblue remains the supported iMessage transport. |
+
+### What remains the same
+
+The core Boop experience is unchanged: you text a personal agent over iMessage; a small interaction agent delegates focused work to sub-agents; Convex stores memory and operational state; automations can initiate future work; and Composio, local browser tools, or MCP servers provide integrations. You can still choose Claude or Codex during setup and use subscription authentication instead of a separate runtime API key.
+
+---
+
 ## What you get
 
 - **iMessage in / iMessage out** via Sendblue (with signed inbound requests, typing indicators, and webhook dedup).
